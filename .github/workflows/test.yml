@@ -4,12 +4,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   test:
+    # Actions minutes are free on public repositories; while the repository is private
+    # (before the directory listing goes live) the tests run locally instead.
+    if: ${{ !github.event.repository.private }}
     strategy:
       fail-fast: false
       matrix:
