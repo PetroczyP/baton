@@ -26,13 +26,13 @@ UserPromptSubmit says: Handoff archived to /path/to/project/.claude/handoff-arch
 
 1. **Only the newest handoff is loaded.** That's `handoff-before-clear.md` at the project root, the git top level or else the folder you started in. Each save overwrites it. The archive is never read automatically, and neither is another project's handoff.
 2. **Only new sessions and `/clear` load it.** Resumed and compacted sessions already have their context.
-3. **Only interactive sessions load it.** A headless run (`claude -p`, the Agent SDK) never loads it. Only the session that loaded a handoff archives it, including when you later continue that session headlessly.
+3. **Only interactive Claude Code sessions load it.** A headless run (`claude -p`, the Agent SDK) or a Cowork task never loads it. Only the session that loaded a handoff archives it, including when you later continue that session headlessly.
 4. **Your first message archives it.** It moves to `.claude/handoff-archive/<saved-time>.md`. It never overwrites an existing archive, and never deletes a handoff that another session saved in the meantime. Commands like `/clear`, `/exit`, `/model` and `/effort` don't count as messages, so a session you close without typing leaves the handoff for the next one.
 5. **A first message of `/baton:load-handoff` leaves the file to that skill.**
 6. **Old handoffs are announced, not loaded.** If a handoff was saved more than 14 days ago, the banner says it's there and it stays put. The save time comes from the handoff's `saved_at`, or the file's modification time without it.
 7. **A handoff committed to the repository is not loaded.** Handoffs are personal files, so a tracked one came from someone else or with a clone. It also isn't loaded inside a git repository when git can't tell whether it is tracked.
 8. **A large handoff is pointed to, not pasted.** Claude Code caps hook context at 10,000 characters. Above that, Claude is told where to read the file.
-9. **A file without a `# Handoff` title is not loaded.**
+9. **A file without a `# Handoff` title, or a symbolic link, is not loaded.** The banner says why.
 
 ## What Baton reads, runs and writes
 
@@ -43,7 +43,7 @@ Baton makes no network requests and has no telemetry, account or server. The han
 - reads `<project>/handoff-before-clear.md`, if it exists
 - in a git repository, runs `git status` twice: once for the work tree, once for the handoff file alone
 - writes a small JSON record to Claude Code's data folder for this plugin (`~/.claude/plugins/data/<baton id>/sessions/`): the handoff's path, its SHA-256 hash and the planned archive path
-- deletes records there that are older than 30 days
+- deletes records there that are more than 30 days old
 
 **On each message**, the `UserPromptSubmit` hook:
 

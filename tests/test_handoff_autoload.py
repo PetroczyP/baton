@@ -136,7 +136,8 @@ class SessionStartTests(HookCase):
         unattended = dict(self.env, CLAUDE_CODE_SESSION_ATTENDED="0")
         sdk = {k: v for k, v in self.env.items() if k != "CLAUDE_CODE_SESSION_ATTENDED"}
         sdk["CLAUDE_CODE_ENTRYPOINT"] = "sdk-cli"
-        for env in (unattended, sdk):
+        cowork = dict(self.env, CLAUDE_CODE_ENTRYPOINT="local-agent", CLAUDE_CODE_SESSION_ATTENDED="1")
+        for env in (unattended, sdk, cowork):
             self.assertEqual(self.start(env=env)[:2], (0, {}))
         self.assertEqual(self.prompt()[:2], (0, {}))
         self.assertTrue((self.repo / "handoff-before-clear.md").exists())
@@ -304,6 +305,18 @@ class SessionStartTests(HookCase):
         self.assertEqual(self.context(out), "")
         self.assertEqual(self.prompt()[:2], (0, {}))
         self.assertTrue((self.repo / "handoff-before-clear.md").exists())
+
+    def test_a_symlinked_handoff_is_announced_and_left_alone(self):
+        self.init_repo()
+        (self.repo / "real.md").write_text(handoff_text(body="Behind a link."))
+        link = self.repo / "handoff-before-clear.md"
+        link.symlink_to("real.md")
+        _, out, _ = self.start()
+        self.assertIn("is a symbolic link", out["systemMessage"])
+        self.assertNotIn("Behind a link.", json.dumps(out))
+        self.assertEqual(self.prompt()[:2], (0, {}))
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(self.archived(), [])
 
     def test_committed_handoff_is_not_loaded(self):
         self.init_repo()

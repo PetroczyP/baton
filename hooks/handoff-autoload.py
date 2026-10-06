@@ -16,8 +16,8 @@ It reads the handoff contract (v1) that /baton:save-handoff writes: a front-matt
 `handoff: 1`, `saved_at`, `branch` and `head`, then a `# Handoff` title. A file without a
 valid block still loads, without the branch and HEAD comparison.
 
-Interactive sessions only: headless runs (`claude -p`, SDK) are skipped, so a review
-session started inside the repo neither sees nor archives the handoff.
+Interactive Claude Code sessions only: headless runs (`claude -p`, SDK) and Cowork are skipped,
+so a review session or a Cowork task started in the project neither sees nor archives the handoff.
 
 Exit codes: 0 when it did its job or had nothing to do; 1 when it could not run, which
 Claude Code shows as a non-blocking hook error. Never 2: on UserPromptSubmit that would
@@ -106,10 +106,12 @@ def project_root(cwd: Path) -> tuple[Path, bool]:
     return cwd, False
 
 
-def is_headless() -> bool:
+def is_skipped_session() -> bool:
+    """Headless runs and Cowork tasks: Baton serves interactive Claude Code sessions only."""
     if os.environ.get("CLAUDE_CODE_SESSION_ATTENDED") == "0":
         return True
-    return os.environ.get("CLAUDE_CODE_ENTRYPOINT", "").startswith("sdk")
+    entrypoint = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "")
+    return entrypoint.startswith("sdk") or entrypoint == "local-agent"
 
 
 def has_title(text: str) -> bool:
@@ -243,11 +245,15 @@ def remove_stale_markers() -> None:
 
 
 def session_start(data: dict) -> int:
-    if is_headless() or data.get("source") not in ("startup", "clear"):
+    if is_skipped_session() or data.get("source") not in ("startup", "clear"):
         return 0
     remove_stale_markers()
     root, is_repo = project_root(Path(data.get("cwd") or os.getcwd()))
     handoff = root / HANDOFF_NAME
+    if handoff.is_symlink():
+        emit("SessionStart", f"{HANDOFF_NAME} is a symbolic link, so it was not loaded or moved. "
+                             "Run /baton:load-handoff to use it.")
+        return 0
     if not handoff.is_file():
         return 0
 

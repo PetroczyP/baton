@@ -13,7 +13,7 @@ Baton is a Claude Code plugin that runs entirely on your computer. It has no ser
 
 - **`handoff-before-clear.md`,** in your project, when you run `/baton:save-handoff`. The next save overwrites it.
 - **Archived handoffs,** in `<project>/.claude/handoff-archive/`. They stay until you delete them; uninstalling Baton does not remove them.
-- **Session records,** in Claude Code's data folder for this plugin (`~/.claude/plugins/data/<baton id>/sessions/`). Each holds a handoff's path, its SHA-256 hash and its planned archive path. A record is deleted on the session's first message, or after 30 days if the session never had one. Uninstalling Baton deletes the folder.
+- **Session records,** in Claude Code's data folder for this plugin (`~/.claude/plugins/data/<baton id>/sessions/`). Each holds a handoff's path, its SHA-256 hash and its planned archive path. A record is deleted on the session's first message. A record whose session never had one is deleted at the first session start in which Baton runs once the record is more than 30 days old. Uninstalling Baton deletes the folder.
 
 ## What reaches Claude
 
