@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Baton">
+  <rect width="256" height="256" rx="56" fill="#1f2937"/>
+  <g transform="rotate(-35 128 128)">
+    <rect x="48" y="104" width="160" height="48" rx="24" fill="#f59e0b"/>
+    <rect x="92" y="104" width="14" height="48" fill="#b45309"/>
+    <rect x="150" y="104" width="14" height="48" fill="#b45309"/>
+  </g>
+  <path d="M40 196h44M32 214h36M56 178h28" stroke="#9ca3af" stroke-width="8" stroke-linecap="round"/>
+</svg>

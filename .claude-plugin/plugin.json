@@ -1,0 +1,18 @@
+{
+  "name": "baton",
+  "displayName": "Baton",
+  "version": "1.0.0",
+  "description": "Pass work between Claude Code sessions: save a structured handoff, and the next session in the project starts with it loaded, shows what changed in git since, and archives it on your first message.",
+  "author": {
+    "name": "Peter Petroczy",
+    "url": "https://github.com/PetroczyP"
+  },
+  "homepage": "https://github.com/PetroczyP/baton",
+  "repository": "https://github.com/PetroczyP/baton",
+  "license": "MIT",
+  "keywords": ["handoff", "session", "resume", "context", "continuity"],
+  "icon": "./icon.svg",
+  "documentationUrl": "https://github.com/PetroczyP/baton#readme",
+  "supportUrl": "https://github.com/PetroczyP/baton/issues",
+  "privacyPolicyUrl": "https://github.com/PetroczyP/baton/blob/main/PRIVACY.md"
+}
