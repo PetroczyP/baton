@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Baton's hook: load handoff-before-clear.md into a new Claude Code session.
+"""Torch's hook: load handoff-before-clear.md into a new Claude Code session.
 
 One script, two hook entry points, run by hooks/session-start.sh and hooks/prompt-submit.sh:
 
@@ -9,10 +9,10 @@ One script, two hook entry points, run by hooks/session-start.sh and hooks/promp
                   since it was saved.
   prompt-submit   UserPromptSubmit. On the session's first prompt, moves the loaded
                   handoff to .claude/handoff-archive/ so the next session does not load
-                  it again. A first prompt of /baton:load-handoff leaves the file to that
+                  it again. A first prompt of /torch:load-handoff leaves the file to that
                   skill.
 
-It reads the handoff contract (v1) that /baton:save-handoff writes: a front-matter block with
+It reads the handoff contract (v1) that /torch:save-handoff writes: a front-matter block with
 `handoff: 1`, `saved_at`, `branch` and `head`, then a `# Handoff` title. A file without a
 valid block still loads, without the branch and HEAD comparison.
 
@@ -52,7 +52,7 @@ def state_dir() -> Path:
     """Session records live in the plugin's data folder, which uninstalling the plugin removes."""
     data = os.environ.get("CLAUDE_PLUGIN_DATA")
     if not data:
-        raise RuntimeError("CLAUDE_PLUGIN_DATA is not set; this hook runs as part of the baton plugin")
+        raise RuntimeError("CLAUDE_PLUGIN_DATA is not set; this hook runs as part of the torch plugin")
     return Path(data) / "sessions"
 
 
@@ -107,7 +107,7 @@ def project_root(cwd: Path) -> tuple[Path, bool]:
 
 
 def is_skipped_session() -> bool:
-    """Headless runs and Cowork tasks: Baton serves interactive Claude Code sessions only."""
+    """Headless runs and Cowork tasks: Torch serves interactive Claude Code sessions only."""
     if os.environ.get("CLAUDE_CODE_SESSION_ATTENDED") == "0":
         return True
     entrypoint = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "")
@@ -252,7 +252,7 @@ def session_start(data: dict) -> int:
     handoff = root / HANDOFF_NAME
     if handoff.is_symlink():
         emit("SessionStart", f"{HANDOFF_NAME} is a symbolic link, so it was not loaded or moved. "
-                             "Run /baton:load-handoff to use it.")
+                             "Run /torch:load-handoff to use it.")
         return 0
     if not handoff.is_file():
         return 0
@@ -261,7 +261,7 @@ def session_start(data: dict) -> int:
     text = raw.decode("utf-8", errors="replace")
     if not has_title(text):
         emit("SessionStart", f"{HANDOFF_NAME} has no '# Handoff' title, so it was not loaded. "
-                             "Run /baton:load-handoff to look at it.")
+                             "Run /torch:load-handoff to look at it.")
         return 0
     fields = contract_fields(text)
     saved_ts = fields["saved_ts"] if fields else handoff.stat().st_mtime
@@ -269,17 +269,17 @@ def session_start(data: dict) -> int:
     age = human_age(time.time() - saved_ts)
     if time.time() - saved_ts > MAX_AGE_DAYS * 86400:
         emit("SessionStart", f"A handoff from {saved} ({age} old) is here but was not loaded: it is "
-                             f"older than {MAX_AGE_DAYS} days. Run /baton:load-handoff to use it.")
+                             f"older than {MAX_AGE_DAYS} days. Run /torch:load-handoff to use it.")
         return 0
 
     status = repo_status(root) if is_repo else None
     if status is not None and status["handoff_tracked"] is None:
         emit("SessionStart", f"Could not check with git whether {HANDOFF_NAME} is committed to this "
-                             "repo, so it was not loaded. Run /baton:load-handoff if it is yours.")
+                             "repo, so it was not loaded. Run /torch:load-handoff if it is yours.")
         return 0
     if status is not None and status["handoff_tracked"]:
         emit("SessionStart", f"{HANDOFF_NAME} is committed to this repo, so it was not loaded. "
-                             "Run /baton:load-handoff if it is yours.")
+                             "Run /torch:load-handoff if it is yours.")
         return 0
 
     drift = drift_parts(status, is_repo, fields)
@@ -301,7 +301,7 @@ def session_start(data: dict) -> int:
 
     if archived_later:
         where = (f"When the user's first message arrives it moves to {archive_to}, "
-                 "unless that message is /baton:load-handoff, which then handles it.")
+                 "unless that message is /torch:load-handoff, which then handles it.")
         tail = "Archived after your first message."
     else:
         where = "It stays in place: this session could not be recorded for archiving."
@@ -309,7 +309,7 @@ def session_start(data: dict) -> int:
 
     header = (
         "A handoff from the previous session in this project was loaded automatically "
-        "(baton plugin).\n\n"
+        "(torch plugin).\n\n"
         f"File: {handoff}, saved {saved}, {age} ago.\n"
         f"Git now, compared with the handoff: {'; '.join(drift)}.\n"
         f"{where}\n\n"
@@ -392,7 +392,7 @@ def prompt_submit(data: dict) -> int:
         info = json.loads(marker.read_text())
     finally:
         marker.unlink()
-    if re.match(r"\s*/(?:baton:)?load-handoff(\s|$)", data.get("prompt") or ""):
+    if re.match(r"\s*/(?:torch:)?load-handoff(\s|$)", data.get("prompt") or ""):
         return 0
     outcome, dest = archive(Path(info["handoff"]), info["sha256"], Path(info["archive_to"]))
     if outcome == "archived":

@@ -1,4 +1,4 @@
-"""Tests for Baton as a plugin: hooks.json, the two shell wrappers, and what the directory checks.
+"""Tests for Torch as a plugin: hooks.json, the two shell wrappers, and what the directory checks.
 
 The hook commands are run the way Claude Code runs them: `${CLAUDE_PLUGIN_ROOT}` substituted into
 the command from hooks.json, the result passed to `sh -c`, the hook input on stdin and the plugin
@@ -47,7 +47,7 @@ class PluginCase(unittest.TestCase):
         self.repo.mkdir()
         self.env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
         self.env.update(HOME=str(self.home), CLAUDE_PLUGIN_ROOT=str(self.root),
-                        CLAUDE_PLUGIN_DATA=str(self.data), CLAUDE_CODE_SESSION_ID=SESSION,
+                        CLAUDE_PLUGIN_DATA=str(self.data),
                         CLAUDE_CODE_ENTRYPOINT="cli", CLAUDE_CODE_SESSION_ATTENDED="1",
                         GIT_CONFIG_NOSYSTEM="1")
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.repo, env=self.env, check=True)
@@ -55,11 +55,13 @@ class PluginCase(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
-    def run_event(self, event: str, payload: dict, env: dict | None = None):
+    def run_event(self, event: str, payload: object, env: dict | None = None):
+        """Run the event's command; a dict payload is sent as Claude Code sends it, one compact line."""
         [group] = hook_commands()[event]
         [hook] = group["hooks"]
         command = hook["command"].replace("${CLAUDE_PLUGIN_ROOT}", str(self.root))
-        return subprocess.run(["/bin/sh", "-c", command], input=json.dumps(payload), env=env or self.env,
+        stdin = payload if isinstance(payload, str) else json.dumps(payload, separators=(",", ":")) + "\n"
+        return subprocess.run(["/bin/sh", "-c", command], input=stdin, env=env or self.env,
                               capture_output=True, text=True, timeout=60)
 
     def payload(self, event: str, **extra: str) -> dict:
@@ -91,26 +93,36 @@ class HooksJsonTests(PluginCase):
 
 class WrapperTests(PluginCase):
     def replace_hook_with_a_sentinel(self) -> Path:
-        sentinel = self.home / "python-started"
+        """Swap the Python hook for one that records each run and the exact input it received."""
+        received = self.home / "python-received"
         (self.root / "hooks" / "handoff-autoload.py").write_text(
-            f"import sys\nopen({str(sentinel)!r}, 'a').write(sys.argv[1] + '\\n')\n")
-        return sentinel
+            "import sys\n"
+            f"open({str(received)!r}, 'a').write(sys.argv[1] + '|' + sys.stdin.read() + '\\n---\\n')\n")
+        return received
+
+    def record_for(self, session: str) -> None:
+        record = self.data / "sessions" / f"{session}.json"
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text("{}")
 
     def test_prompt_submit_starts_python_only_for_a_session_with_a_record(self):
-        sentinel = self.replace_hook_with_a_sentinel()
-        prompt = self.payload("UserPromptSubmit", prompt="go")
+        received = self.replace_hook_with_a_sentinel()
+        prompt = self.payload("UserPromptSubmit", prompt='go "now" \\ please')
         self.run_event("UserPromptSubmit", prompt)
-        self.assertFalse(sentinel.exists(), "started Python for a session with no record")
-        record = self.data / "sessions" / f"{SESSION}.json"
-        record.parent.mkdir(parents=True)
-        record.write_text("{}")
+        self.assertFalse(received.exists(), "started Python for a session with no record")
+        self.record_for("ffffffff-0000-0000-0000-000000000000")
         self.run_event("UserPromptSubmit", prompt)
-        self.assertEqual(sentinel.read_text(), "prompt-submit\n")
-        record.unlink()
-        no_id = {k: v for k, v in self.env.items() if k != "CLAUDE_CODE_SESSION_ID"}
-        self.run_event("UserPromptSubmit", prompt, no_id)
-        self.assertEqual(sentinel.read_text(), "prompt-submit\nprompt-submit\n",
-                         "without a session id Python must decide")
+        self.assertFalse(received.exists(), "started Python for another session's record")
+        self.record_for(SESSION)
+        self.run_event("UserPromptSubmit", prompt)
+        line = json.dumps(prompt, separators=(",", ":"))
+        self.assertEqual(received.read_text(), f"prompt-submit|{line}\n\n---\n")
+
+    def test_input_the_shell_cannot_read_goes_to_python_unchanged(self):
+        received = self.replace_hook_with_a_sentinel()
+        pretty = json.dumps(self.payload("UserPromptSubmit", prompt="go"), indent=2) + "\n"
+        self.run_event("UserPromptSubmit", pretty)
+        self.assertEqual(received.read_text(), f"prompt-submit|{pretty}\n---\n")
 
     def test_session_start_without_python_says_so_and_does_not_block(self):
         only_sh = self.home / "bin"
@@ -128,7 +140,7 @@ class DirectoryRequirementTests(unittest.TestCase):
 
     def test_manifest_has_the_listing_fields(self):
         manifest = json.loads((ROOT / ".claude-plugin" / "plugin.json").read_text())
-        self.assertEqual(manifest["name"], "baton")
+        self.assertEqual(manifest["name"], "torch")
         self.assertRegex(manifest["version"], r"^\d+\.\d+\.\d+$")
         for key in ("description", "license", "homepage", "repository"):
             self.assertTrue(manifest[key], key)

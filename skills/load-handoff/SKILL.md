@@ -1,11 +1,11 @@
 ---
 name: load-handoff
-description: In Claude Code, load a saved handoff by hand. Reads handoff-before-clear.md, or the newest archived handoff when there is none, checks git drift, and confirms the next step before resuming. Use only when the user asks to load or reload a handoff, or to recover an archived one. Baton loads the handoff by itself at session start, so an ordinary "continue" needs no skill. Needs Claude Code with the user's project folder; not for claude.ai chat.
+description: In Claude Code, load a saved handoff by hand. Reads handoff-before-clear.md, or the newest archived handoff when there is none, checks git drift, and confirms the next step before resuming. Use only when the user asks to load or reload a handoff, or to recover an archived one. Torch loads the handoff by itself at session start, so an ordinary "continue" needs no skill. Needs Claude Code with the user's project folder; not for claude.ai chat.
 ---
 
-This skill needs Claude Code working in the user's own project folder on their machine. If you are not in Claude Code with that folder (for example in claude.ai chat or a temporary sandbox), tell the user Baton needs Claude Code and stop.
+This skill needs Claude Code working in the user's own project folder on their machine. If you are not in Claude Code with that folder (for example in claude.ai chat or a temporary sandbox), tell the user Torch needs Claude Code and stop.
 
-If this session already received the handoff at session start (Baton's message says so) and the user only asks to continue, don't use this skill: continue from the handoff you have.
+If this session already received the handoff at session start (Torch's message says so) and the user only asks to continue, don't use this skill: continue from the handoff you have.
 
 Resume the work described in `handoff-before-clear.md` without losing continuity.
 
@@ -54,7 +54,7 @@ Do NOT start executing work automatically. The user may want to adjust the plan,
 
 Once the user says go, ask one more short question: "Archive or keep the handoff file?" Skip it when the handoff came from the archive: it is already there.
 
-- **Archive** → move the file to `<project-root>/.claude/handoff-archive/<ISO-timestamp>.md` (create the directory if needed). A later `/baton:load-handoff` then offers it only as an archived handoff, and only when there is no live one.
+- **Archive** → move the file to `<project-root>/.claude/handoff-archive/<ISO-timestamp>.md` (create the directory if needed). A later `/torch:load-handoff` then offers it only as an archived handoff, and only when there is no live one.
 - **Keep** → leave the file in place (useful if the resume is tentative and might be repeated).
 
 Default to recommending archive — most handoffs are single-use.

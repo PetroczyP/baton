@@ -1,4 +1,4 @@
-"""Tests for Baton's hook, hooks/handoff-autoload.py.
+"""Tests for Torch's hook, hooks/handoff-autoload.py.
 
 Each test runs the hook the way Claude Code does: a separate process, hook input as JSON
 on stdin, the result read from stdout and the exit code. HOME points at a throwaway
@@ -417,7 +417,7 @@ class PromptSubmitTests(HookCase):
         self.assertEqual(len(self.archived()), 1)
 
     def test_load_handoff_as_first_prompt_leaves_the_file_to_the_skill(self):
-        for command in ("/baton:load-handoff", "/load-handoff"):
+        for command in ("/torch:load-handoff", "/load-handoff"):
             with self.subTest(command=command):
                 self.tearDown()
                 self.setUp()

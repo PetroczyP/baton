@@ -1,9 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Baton">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Torch">
   <rect width="256" height="256" rx="56" fill="#1f2937"/>
-  <g transform="rotate(-35 128 128)">
-    <rect x="48" y="104" width="160" height="48" rx="24" fill="#f59e0b"/>
-    <rect x="92" y="104" width="14" height="48" fill="#b45309"/>
-    <rect x="150" y="104" width="14" height="48" fill="#b45309"/>
-  </g>
-  <path d="M40 196h44M32 214h36M56 178h28" stroke="#9ca3af" stroke-width="8" stroke-linecap="round"/>
+  <path d="M128 44c26 26 40 48 40 70 0 24-18 40-40 40s-40-16-40-40c0-14 6-26 16-36 2 14 8 22 16 24-6-20 0-40 8-58z" fill="#f59e0b"/>
+  <path d="M128 92c12 12 18 22 18 32 0 11-8 18-18 18s-18-7-18-18c0-10 6-20 18-32z" fill="#fde68a"/>
+  <path d="M104 160h48l-12 64a6 6 0 0 1-6 5h-12a6 6 0 0 1-6-5z" fill="#b45309"/>
+  <rect x="98" y="152" width="60" height="12" rx="6" fill="#92400e"/>
 </svg>

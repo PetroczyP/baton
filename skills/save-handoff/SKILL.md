@@ -3,7 +3,7 @@ name: save-handoff
 description: In Claude Code, save the current session's state (goal, progress, files, git state, open decisions) to handoff-before-clear.md in the project so the next session can resume. Use when the user asks to save, wrap up, checkpoint or pause work, mentions /clear or /compact, or says context is running low. Needs Claude Code with the user's project folder; not for claude.ai chat.
 ---
 
-This skill needs Claude Code working in the user's own project folder on their machine. If you are not in Claude Code with that folder (for example in claude.ai chat or a temporary sandbox), tell the user Baton needs Claude Code and stop.
+This skill needs Claude Code working in the user's own project folder on their machine. If you are not in Claude Code with that folder (for example in claude.ai chat or a temporary sandbox), tell the user Torch needs Claude Code and stop.
 
 Write a continuation handoff to `handoff-before-clear.md` at the project root so a fresh Claude session can pick up exactly where this one leaves off.
 
@@ -70,5 +70,5 @@ Aim for 400–800 words. Go up to roughly 1500 only if truly necessary. Leaner i
 
 ## After writing
 
-1. Check that git ignores both the handoff and its archive: run `git check-ignore -q handoff-before-clear.md` and `git check-ignore -q .claude/handoff-archive/x.md` from the project root (exit status 0 means ignored). For each one that is not ignored, tell the user so they can add it to `.gitignore` — handoffs, and the archived copies that Baton moves into `.claude/handoff-archive/`, may contain ticket IDs, internal decisions, credentials, or paths that shouldn't land in commits.
+1. Check that git ignores both the handoff and its archive: run `git check-ignore -q handoff-before-clear.md` and `git check-ignore -q .claude/handoff-archive/x.md` from the project root (exit status 0 means ignored). For each one that is not ignored, tell the user so they can add it to `.gitignore` — handoffs, and the archived copies that Torch moves into `.claude/handoff-archive/`, may contain ticket IDs, internal decisions, credentials, or paths that shouldn't land in commits.
 2. Confirm to the user: "Handoff saved to `handoff-before-clear.md`. The next session in this project, or this one after `/clear`, loads it automatically. (Use `/compact` instead if you only want to compress context without a full reset.)"
