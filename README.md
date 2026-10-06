@@ -30,7 +30,7 @@ UserPromptSubmit says: Handoff archived to /path/to/project/.claude/handoff-arch
 4. **Your first message archives it.** It moves to `.claude/handoff-archive/<saved-time>.md`. It never overwrites an existing archive, and never deletes a handoff that another session saved in the meantime. Commands like `/clear`, `/exit`, `/model` and `/effort` don't count as messages, so a session you close without typing leaves the handoff for the next one.
 5. **A first message of `/baton:load-handoff` leaves the file to that skill.**
 6. **Old handoffs are announced, not loaded.** If a handoff was saved more than 14 days ago, the banner says it's there and it stays put. The save time comes from the handoff's `saved_at`, or the file's modification time without it.
-7. **A handoff committed to the repository is not loaded.** Handoffs are personal files, so a tracked one came from someone else or with a clone. It also isn't loaded inside a git repository when git can't tell whether it is tracked.
+7. **A handoff committed to the repository is not loaded.** Handoffs are meant to stay out of commits, so a tracked one may be someone else's or may have come with a clone. It also isn't loaded inside a git repository when git can't tell whether it is tracked. These checks keep foreign handoffs out of the automatic load; they don't prove who wrote a file.
 8. **A large handoff is pointed to, not pasted.** Claude Code caps hook context at 10,000 characters. Above that, Claude is told where to read the file.
 9. **A file without a `# Handoff` title, or a symbolic link, is not loaded.** The banner says why.
 
@@ -113,7 +113,7 @@ A handoff without a valid block still loads; the banner then says `no saved git 
 
 ## Uninstall
 
-Uninstall Baton with `/plugin` in Claude Code, or remove it on claude.ai. Claude Code then deletes the plugin's data folder, including the session records. Your handoff files and archives stay in your projects until you delete them.
+Uninstall Baton with `/plugin` in Claude Code, or remove it on claude.ai. Claude Code then normally deletes the plugin's data folder, including the session records, unless you keep it with `claude plugin uninstall --keep-data`. Your handoff files and archives stay in your projects until you delete them.
 
 ## Support and security
 
