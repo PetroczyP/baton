@@ -26,9 +26,10 @@ const RECORD_PREFIX = 'session:'
 const LOAD_SKILL = /^\s*\/(?:torch:)?load-handoff(\s|$)/
 const USER_ORIGINS = new Set(['composer', 'bridge'])
 
-// Sessions whose first message is being handled now: a second message of the same session that
-// arrives meanwhile passes on unchanged, so a handoff is delivered and archived at most once.
-const delivering = new Set()
+// Sessions that have had their first message from the user, kept for the life of the module. A
+// message of a session already here passes on unchanged, whether it overlaps the first or comes
+// after a first message whose record could not be deleted, so a session acts at most once.
+const answered = new Set()
 
 export function register(on) {
   on('classic.SessionStart', { source: ['startup', 'clear'] }, announceHandoff)
@@ -123,28 +124,26 @@ async function announce($, e) {
 async function firstMessageContext($, e) {
   if (!USER_ORIGINS.has(e.origin?.kind)) return null
   const sessionId = usableSessionId(await $.session.id())
-  if (sessionId === null || delivering.has(sessionId)) return null
-  delivering.add(sessionId)
-  try {
-    // A session on an unsupported platform never announced a handoff, so it has nothing to deliver.
-    if (!(await $.session.cwd()).startsWith('/')) return null
-    const key = RECORD_PREFIX + sessionId
-    const record = await $.store.get(key)
-    if (record === undefined) return null
-    // Delete the record before acting: whatever happens next, this session tries at most once.
-    await $.store.delete(key)
-    if (LOAD_SKILL.test(typeof e.text === 'string' ? e.text : '')) return null
-    if (!isRecord(record)) throw new Error('the session record is not valid')
-    const outcome = await archive($, record.handoff, record.sha256, record.archiveTo)
-    const texts = deliveredTexts({
-      ...outcome, handoff: record.handoff, saved: localTime(record.savedTs),
-      age: humanAge(Date.now() / 1000 - record.savedTs), drift: record.drift,
-    })
-    $.ui.log(texts.banner)
-    return texts.context
-  } finally {
-    delivering.delete(sessionId)
+  if (sessionId === null || answered.has(sessionId)) return null
+  answered.add(sessionId)
+  // A session on an unsupported platform never announced a handoff, so it has nothing to deliver.
+  if (!(await $.session.cwd()).startsWith('/')) return null
+  const key = RECORD_PREFIX + sessionId
+  const record = await $.store.get(key)
+  if (record === undefined) return null
+  // Delete the record before acting, so a later session never acts on it again.
+  await $.store.delete(key)
+  if (LOAD_SKILL.test(typeof e.text === 'string' ? e.text : '')) return null
+  if (!isRecord(record)) throw new Error('the session record is not valid')
+  // Everything the report needs is worked out before a file moves.
+  const facts = {
+    handoff: record.handoff, saved: localTime(record.savedTs),
+    age: humanAge(Date.now() / 1000 - record.savedTs), drift: record.drift,
   }
+  const outcome = await archive($, record.handoff, record.sha256, record.archiveTo)
+  const texts = deliveredTexts({ ...outcome, ...facts })
+  $.ui.log(texts.banner)
+  return texts.context
 }
 
 // The stat of a symbolic link that leads nowhere, which $.fs.exists reports as absent, or null

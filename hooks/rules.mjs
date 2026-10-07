@@ -258,10 +258,13 @@ export function randomHex(byteCount) {
     .map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
+// JavaScript dates reach 8.64e15 ms either side of 1970.
+const MAX_DATE_SECONDS = 8.64e12
+
 // A session record as announce() writes it.
 export function isRecord(value) {
   return value !== null && typeof value === 'object'
     && ['handoff', 'sha256', 'archiveTo'].every((key) => typeof value[key] === 'string')
-    && Number.isFinite(value.savedTs)
+    && Number.isFinite(value.savedTs) && Math.abs(value.savedTs) <= MAX_DATE_SECONDS
     && Array.isArray(value.drift) && value.drift.every((part) => typeof part === 'string')
 }

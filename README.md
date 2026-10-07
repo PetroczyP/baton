@@ -48,7 +48,7 @@ They are preceded by:
 - the handoff's path, its save time, and where it is now: in the archive, or where it was kept when the move couldn't finish
 - the git drift summary from session start
 
-A handoff too large to include is replaced by its path and an instruction to read it before acting on it. If the file changed or disappeared between session start and your first message, Claude gets no handoff, and both you and Claude are told what happened and where the file is.
+A handoff too large to include is replaced by its path and an instruction to read it before acting on it. If the file changed between session start and your first message, Claude gets no handoff, and both you and Claude are told what happened and where the file is. If it disappeared, you are told, and Claude gets nothing.
 
 ## How it decides
 
