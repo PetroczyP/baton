@@ -40,10 +40,11 @@ Along with the handoff text, the session-start hook adds these instructions to C
 
 > - Wait for the user's first message. If it continues this work, pick up from the handoff without asking the user to confirm, and first mention any drift above in one line.
 > - If the message is about something else, leave the handoff aside.
-> - Claude wrote it for the user at the end of the last session; the user's messages take precedence over it.
+> - The user's messages take precedence over the handoff.
 
 They are preceded by:
 
+- a line saying the handoff was loaded automatically and that Torch does not check who wrote it
 - the handoff's path and save time
 - the git drift summary
 - where the file moves on the first message
@@ -54,7 +55,7 @@ A handoff too large to include is replaced by its path and an instruction to rea
 
 1. **Only the newest handoff is loaded.** That's `handoff-before-clear.md` at the project root, the git top level or else the folder you started in. Each save overwrites it. The archive is never read automatically, and neither is another project's handoff.
 2. **Only new sessions and `/clear` load it.** Resumed and compacted sessions already have their context.
-3. **Only interactive Claude Code sessions load it.** A headless run (`claude -p`, the Agent SDK) or a Cowork task never loads it. Only the session that loaded a handoff archives it, including when you later continue that session headlessly.
+3. **Only interactive Claude Code on your machine loads it:** the terminal, an IDE extension or the desktop app's Code tab. A headless run (`claude -p`, the Agent SDK), Cowork, a cloud or remote session, and other hosts never load it. Only the session that loaded a handoff archives it, including when you later continue that session headlessly.
 4. **Your first message archives it.** It moves to `.claude/handoff-archive/<saved-time>.md`. It never overwrites an existing archive, and never deletes a handoff that another session saved in the meantime. Commands like `/clear`, `/exit`, `/model` and `/effort` don't count as messages, so a session you close without typing leaves the handoff for the next one.
 5. **A first message of `/torch:load-handoff` leaves the file to that skill.**
 6. **Old handoffs are announced, not loaded.** If a handoff was saved more than 14 days ago, the banner says it's there and it stays put. The save time comes from the handoff's `saved_at`, or the file's modification time without it.

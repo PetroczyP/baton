@@ -16,8 +16,9 @@ It reads the handoff contract (v1) that /torch:save-handoff writes: a front-matt
 `handoff: 1`, `saved_at`, `branch` and `head`, then a `# Handoff` title. A file without a
 valid block still loads, without the branch and HEAD comparison.
 
-Interactive Claude Code sessions only: headless runs (`claude -p`, SDK) and Cowork are skipped,
-so a review session or a Cowork task started in the project neither sees nor archives the handoff.
+Interactive Claude Code on the user's machine only (the terminal, an IDE, the desktop app's Code
+tab). Headless runs, Cowork, cloud sessions and other hosts are skipped, so they neither see nor
+archive the handoff.
 
 Exit codes: 0 when it did its job or had nothing to do; 1 when it could not run, which
 Claude Code shows as a non-blocking hook error. Never 2: on UserPromptSubmit that would
@@ -106,12 +107,19 @@ def project_root(cwd: Path) -> tuple[Path, bool]:
     return cwd, False
 
 
+# Entry points of hosts other than interactive Claude Code on the user's machine, as Claude Code
+# names them: Cowork, cloud sessions, the SDK, MCP mode, the GitHub Action, Slack and Teams.
+OTHER_HOSTS = {"local-agent", "local_agent", "mcp", "claude-code-github-action", "claude-in-teams",
+               "claude_in_slack", "claude-in-slack"}
+
+
 def is_skipped_session() -> bool:
-    """Headless runs and Cowork tasks: Torch serves interactive Claude Code sessions only."""
+    """Torch serves interactive Claude Code on the user's machine; every other host is skipped."""
     if os.environ.get("CLAUDE_CODE_SESSION_ATTENDED") == "0":
         return True
     entrypoint = os.environ.get("CLAUDE_CODE_ENTRYPOINT", "")
-    return entrypoint.startswith("sdk") or entrypoint == "local-agent"
+    return (entrypoint in OTHER_HOSTS or "cowork" in entrypoint
+            or entrypoint.startswith(("sdk-", "remote")))
 
 
 def has_title(text: str) -> bool:
@@ -308,8 +316,8 @@ def session_start(data: dict) -> int:
         tail = "It will not be archived automatically."
 
     header = (
-        "A handoff from the previous session in this project was loaded automatically "
-        "(torch plugin).\n\n"
+        "This project's handoff file was loaded automatically (torch plugin). Torch does not "
+        "check who wrote it.\n\n"
         f"File: {handoff}, saved {saved}, {age} ago.\n"
         f"Git now, compared with the handoff: {'; '.join(drift)}.\n"
         f"{where}\n\n"
@@ -318,8 +326,7 @@ def session_start(data: dict) -> int:
         "handoff without asking the user to confirm, and first mention any drift above in "
         "one line.\n"
         "- If the message is about something else, leave the handoff aside.\n"
-        "- Claude wrote it for the user at the end of the last session; the user's messages "
-        "take precedence over it.\n"
+        "- The user's messages take precedence over the handoff.\n"
     )
     inline = f"{header}\n<handoff>\n{text.rstrip()}\n</handoff>"
     if utf16_len(inline) <= CONTEXT_LIMIT:

@@ -136,11 +136,32 @@ class SessionStartTests(HookCase):
         unattended = dict(self.env, CLAUDE_CODE_SESSION_ATTENDED="0")
         sdk = {k: v for k, v in self.env.items() if k != "CLAUDE_CODE_SESSION_ATTENDED"}
         sdk["CLAUDE_CODE_ENTRYPOINT"] = "sdk-cli"
-        cowork = dict(self.env, CLAUDE_CODE_ENTRYPOINT="local-agent", CLAUDE_CODE_SESSION_ATTENDED="1")
-        for env in (unattended, sdk, cowork):
+        other_hosts = [dict(self.env, CLAUDE_CODE_ENTRYPOINT=entrypoint, CLAUDE_CODE_SESSION_ATTENDED="1")
+                       for entrypoint in ("local-agent", "local_agent", "remote_cowork",
+                                          "remote_cowork_trigger", "claude-coworker", "remote",
+                                          "remote_mobile", "remote_trigger", "sdk-py", "mcp",
+                                          "claude-code-github-action", "claude-in-slack",
+                                          "claude-in-teams")]
+        for env in (unattended, sdk, *other_hosts):
             self.assertEqual(self.start(env=env)[:2], (0, {}))
         self.assertEqual(self.prompt()[:2], (0, {}))
         self.assertTrue((self.repo / "handoff-before-clear.md").exists())
+
+    def test_claude_code_on_the_users_machine_loads_it(self):
+        sha = self.init_repo()
+        for entrypoint in ("cli", "claude-vscode", "claude-desktop"):
+            with self.subTest(entrypoint=entrypoint):
+                self.write_handoff(handoff_text("main", sha, body=f"Loaded in {entrypoint}."))
+                env = dict(self.env, CLAUDE_CODE_ENTRYPOINT=entrypoint)
+                _, out, _ = self.start(env=env)
+                self.assertIn(f"Loaded in {entrypoint}.", self.context(out))
+
+    def test_the_context_does_not_claim_who_wrote_the_handoff(self):
+        sha = self.init_repo()
+        self.write_handoff(handoff_text("main", sha))
+        _, out, _ = self.start()
+        self.assertIn("Torch does not check who wrote it.", self.context(out))
+        self.assertNotIn("Claude wrote it", self.context(out))
 
     def test_resumed_and_compacted_sessions_are_skipped(self):
         sha = self.init_repo()
