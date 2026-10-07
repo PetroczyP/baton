@@ -28,8 +28,14 @@ const USER_ORIGINS = new Set(['composer', 'bridge'])
 
 // Sessions that have had their first message from the user, kept for the life of the module. A
 // message of a session already here passes on unchanged, whether it overlaps the first or comes
-// after a first message whose record could not be deleted, so a session acts at most once.
+// after a first message whose record could not be deleted, so a session acts at most once in
+// this run of Torch.
 const answered = new Set()
+
+// This run of Torch, from the module's load to its next reload or the end of the process. Records
+// carry it, and only the run that announced a handoff acts on it, so a record that outlived the
+// set above, after a reload or in a session resumed in a new process, is never acted on.
+const RUN = randomHex(16)
 
 export function register(on) {
   on('classic.SessionStart', { source: ['startup', 'clear'] }, announceHandoff)
@@ -113,13 +119,14 @@ async function announce($, e) {
   // on to -2, -3 and so on.
   const archiveTo = joinPath(joinPath(root, ARCHIVE_DIR), `${archiveStamp(savedTs)}.md`)
   const recorded = await recordSession($, usableSessionId(e.session_id), {
-    handoff, sha256: await sha256Hex(bytes), archiveTo, savedTs, drift, at: Date.now(),
+    handoff, sha256: await sha256Hex(bytes), archiveTo, savedTs, drift, at: Date.now(), run: RUN,
   })
   $.ui.log(announcedBanner({ handoff, text, saved, age, drift, archiveTo, recorded }))
 }
 
 // The context for this message, or null when it passes on unchanged: it is not from the user, its
-// session has no record, it is not the session's first, or it hands the file to /torch:load-handoff.
+// session has no record, it is not the session's first, it hands the file to /torch:load-handoff,
+// or another run of Torch wrote the record.
 // On the first message the handoff is archived first, so the context says where it now is.
 async function firstMessageContext($, e) {
   if (!USER_ORIGINS.has(e.origin?.kind)) return null
@@ -134,6 +141,10 @@ async function firstMessageContext($, e) {
   // Delete the record before acting, so a later session never acts on it again.
   await $.store.delete(key)
   if (LOAD_SKILL.test(typeof e.text === 'string' ? e.text : '')) return null
+  if (record?.run !== RUN) {
+    $.ui.log(deliveredTexts({ outcome: 'earlier-run' }).banner)
+    return null
+  }
   if (!isRecord(record)) throw new Error('the session record is not valid')
   // Everything the report needs is worked out before a file moves.
   const facts = {

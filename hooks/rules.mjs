@@ -185,8 +185,10 @@ export function announcedBanner({ handoff, text, saved, age, drift, archiveTo, r
   return `Handoff ready: ${facts}${size}. Claude gets it with your first message, which archives it.`
 }
 
-// What the user and Claude are told with the first message, by the archive's outcome. The handoff
-// is delivered only when it was read and is the one announced: "archived" and "kept".
+// What the user and Claude are told with the first message, by the archive's outcome, or
+// "earlier-run" when another run of Torch wrote the record; what that run did is unknown, so its
+// notice says only what this message did. The handoff is delivered only when it was
+// read and is the one announced: "archived" and "kept".
 export function deliveredTexts({ outcome, place, handoff, leftover, text, saved, age, drift }) {
   const extra = leftover ? ` Torch could not remove its temporary name for it, ${leftover}, which may remain.` : ''
   const none = 'No handoff was delivered with this message.'
@@ -224,6 +226,12 @@ export function deliveredTexts({ outcome, place, handoff, leftover, text, saved,
       }
     case 'gone':
       return { banner: `${HANDOFF_NAME} was gone before your first message, so Claude didn't get it.`, context: null }
+    case 'earlier-run':
+      return {
+        banner: "This session's handoff record is from an earlier run of Torch, so Torch didn't give Claude a "
+          + 'handoff or move one with this message. Run /torch:load-handoff if you need it.',
+        context: null,
+      }
     default:
       throw new Error(`unknown archive outcome: ${outcome}`)
   }
