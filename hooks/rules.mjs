@@ -147,38 +147,85 @@ export function ancestors(folder) {
 }
 
 export const GUIDANCE = [
-  "- Wait for the user's first message. If it continues this work, pick up from the handoff without "
-    + 'asking the user to confirm, and first mention any drift above in one line.',
-  '- If the message is about something else, leave the handoff aside.',
+  '- If this message continues the work in the handoff, pick up from it without asking the user to '
+    + 'confirm, and first mention any drift above in one line.',
+  '- If this message is about something else, leave the handoff aside.',
   "- The user's messages take precedence over the handoff.",
 ]
 
-// What Claude reads at session start, and the banner the user sees.
-export function loadedTexts({ handoff, text, saved, age, drift, archiveTo, recorded }) {
-  const where = recorded
-    ? `When the user's first message arrives it moves to ${archiveTo}, `
-      + 'unless that message is /torch:load-handoff, which then handles it.'
-    : 'It stays in place: this session could not be recorded for archiving.'
-  const tail = recorded ? 'Archived after your first message.' : 'It will not be archived automatically.'
-  const header = "This project's handoff file was loaded automatically (torch plugin). Torch does not "
-    + 'check who wrote it.\n\n'
-    + `File: ${handoff}, saved ${saved}, ${age} ago.\n`
-    + `Git now, compared with the handoff: ${drift.join('; ')}.\n`
-    + `${where}\n\n`
+// What Claude reads with the first message when the handoff is delivered: the header, then the
+// handoff itself, or where to read it when the whole would pass CONTEXT_LIMIT UTF-16 units.
+function handoffContext({ handoff, place, location, saved, age, drift, text }) {
+  const header = "This project's handoff file was loaded automatically with this message (torch plugin). "
+    + 'Torch does not check who wrote it.\n\n'
+    + `File: ${handoff}, saved ${saved}, ${age} ago. ${location}\n`
+    + `Git at session start, compared with the handoff: ${drift.join('; ')}.\n\n`
     + `How to use it:\n${GUIDANCE.join('\n')}\n`
   const inline = `${header}\n<handoff>\n${text.trimEnd()}\n</handoff>`
+  if (inline.length <= CONTEXT_LIMIT) return { context: inline, inline: true }
   const size = [...text].length.toLocaleString('en-US')
-  if (inline.length <= CONTEXT_LIMIT) {
-    return { context: inline, banner: `Handoff loaded: saved ${saved} (${age} ago) · ${drift.join(' · ')}. ${tail}` }
-  }
-  const location = recorded
-    ? `It is at ${handoff} until the user's first message, then at ${archiveTo}.`
-    : `It is at ${handoff}.`
   return {
-    context: `${header}\nThe handoff is ${size} characters, too long to include here. `
-      + `Read it before acting on it. ${location}`,
-    banner: `Handoff loaded: saved ${saved} (${age} ago) · ${drift.join(' · ')}`
-      + ` · ${size} chars, Claude reads it from the file. ${tail}`,
+    context: `${header}\nThe handoff is ${size} characters, too long to include here. Read it at ${place} `
+      + 'before acting on it.',
+    inline: false,
+  }
+}
+
+// The banner at session start. Whether the handoff will be pointed to rather than included is
+// judged with the archive name planned now.
+export function announcedBanner({ handoff, text, saved, age, drift, archiveTo, recorded }) {
+  const facts = `saved ${saved} (${age} ago) · ${drift.join(' · ')}`
+  if (!recorded) {
+    return `Handoff found: ${facts}. Torch could not record this session, so run /torch:load-handoff to use it.`
+  }
+  const { inline } = handoffContext({
+    handoff, place: archiveTo, location: `It is now archived at ${archiveTo}.`, saved, age, drift, text,
+  })
+  const size = inline ? '' : ` · ${[...text].length.toLocaleString('en-US')} chars, Claude reads it from the file`
+  return `Handoff ready: ${facts}${size}. Claude gets it with your first message, which archives it.`
+}
+
+// What the user and Claude are told with the first message, by the archive's outcome. The handoff
+// is delivered only when it was read and is the one announced: "archived" and "kept".
+export function deliveredTexts({ outcome, place, handoff, leftover, text, saved, age, drift }) {
+  const extra = leftover ? ` Torch could not remove its temporary name for it, ${leftover}, which may remain.` : ''
+  const none = 'No handoff was delivered with this message.'
+  switch (outcome) {
+    case 'archived':
+      return {
+        banner: `Handoff archived to ${place}${leftover ? `.${extra}` : ''}`,
+        context: handoffContext({ handoff, place, location: `It is now archived at ${place}.${extra}`, saved, age, drift, text }).context,
+      }
+    case 'kept':
+      return {
+        banner: `Could not archive ${HANDOFF_NAME}: it could not be linked into the archive. It is kept at ${place}.`,
+        context: handoffContext({ handoff, place, location: `It could not be archived and is now at ${place}.`, saved, age, drift, text }).context,
+      }
+    case 'changed':
+      return {
+        banner: `${HANDOFF_NAME} changed after it was announced, so Claude didn't get it; the file was left for the `
+          + `next session${place ? ` (an earlier save is kept in ${place})` : ''}.${extra}`,
+        context: `${none} Another session saved a newer handoff after this session announced its own. The file at `
+          + `${handoff} is that newer handoff, not the one announced at session start`
+          + (place ? `; an intermediate save is kept at ${place}.` : '.') + extra,
+      }
+    case 'kept-other':
+      return {
+        banner: `${HANDOFF_NAME} changed after it was announced and could not be put back, so Claude didn't get it. `
+          + `The newer file is at ${place}.`,
+        context: `${none} A handoff saved after this session announced its own is now at ${place}. It is not the `
+          + 'handoff announced at session start.',
+      }
+    case 'kept-unread':
+      return {
+        banner: `Could not archive ${HANDOFF_NAME}: the file could not be read, so Claude didn't get it. It is kept at ${place}.`,
+        context: `${none} The handoff file is now at ${place}. It could not be read, so it is unknown whether `
+          + 'it is the one announced at session start.',
+      }
+    case 'gone':
+      return { banner: `${HANDOFF_NAME} was gone before your first message, so Claude didn't get it.`, context: null }
+    default:
+      throw new Error(`unknown archive outcome: ${outcome}`)
   }
 }
 
@@ -192,45 +239,6 @@ export const REFUSALS = {
   platform: 'Torch supports macOS and Linux; the handoff was not loaded.',
   old: (saved, age) => `A handoff from ${saved} (${age} old) is here but was not loaded: it is older than `
     + `${MAX_AGE_DAYS} days. Run /torch:load-handoff to use it.`,
-}
-
-// What the user and Claude are told after the first prompt, by the archive's outcome.
-export function archivedTexts({ outcome, place, handoff, leftover }) {
-  const extra = leftover ? ` Torch could not remove its temporary name for it, ${leftover}, which may remain.` : ''
-  switch (outcome) {
-    case 'archived':
-      return {
-        banner: `Handoff archived to ${place}${leftover ? `.${extra}` : ''}`,
-        context: `The auto-loaded handoff is now archived at ${place}.${extra}`,
-      }
-    case 'changed':
-      return {
-        banner: `${HANDOFF_NAME} changed after it was loaded, so it was left for the next session`
-          + (place ? ` (kept in ${place}).` : '.') + extra,
-        context: `Another session saved a newer handoff after this session loaded its own. The file at `
-          + `${handoff} is that newer handoff, not the one loaded at session start`
-          + (place ? `; an intermediate save is kept at ${place}.` : '.') + extra,
-      }
-    case 'kept':
-      return {
-        banner: `Could not archive ${HANDOFF_NAME}: it could not be linked into the archive. It is kept at ${place}.`,
-        context: `The auto-loaded handoff could not be archived and is now at ${place}.`,
-      }
-    case 'kept-other':
-      return {
-        banner: `${HANDOFF_NAME} changed after it was loaded and could not be put back. The newer file is at ${place}.`,
-        context: `A handoff saved after this session loaded its own is now at ${place}. It is not the `
-          + 'handoff loaded at session start.',
-      }
-    case 'kept-unread':
-      return {
-        banner: `Could not archive ${HANDOFF_NAME}: the file could not be read. It is kept at ${place}.`,
-        context: `The handoff file is now at ${place}. It could not be read, so it is unknown whether `
-          + 'it is the one loaded at session start.',
-      }
-    default:
-      return null
-  }
 }
 
 export function base64ToBytes(base64) {
@@ -250,8 +258,10 @@ export function randomHex(byteCount) {
     .map((byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
-// A session record as loadHandoff writes it.
+// A session record as announce() writes it.
 export function isRecord(value) {
   return value !== null && typeof value === 'object'
     && ['handoff', 'sha256', 'archiveTo'].every((key) => typeof value[key] === 'string')
+    && Number.isFinite(value.savedTs)
+    && Array.isArray(value.drift) && value.drift.every((part) => typeof part === 'string')
 }
