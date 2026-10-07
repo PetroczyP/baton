@@ -22,6 +22,7 @@ import {
 
 const GIT_TIMEOUT_MS = 5_000
 const CLAIM_PREFIX = '.handoff-claim-'
+const ARCHIVE_NAMES = 100     // dest, dest-2, ..., dest-100
 const RECORD_PREFIX = 'session:'
 const LOAD_SKILL = /^\s*\/(?:torch:)?load-handoff(\s|$)/
 const USER_ORIGINS = new Set(['composer', 'bridge'])
@@ -302,16 +303,18 @@ async function claimFailure($, handoff, claim) {
   throw new Error(`mv could not claim ${handoff}: ${reason}`)
 }
 
-// Hard-link source at dest, or at dest-2, dest-3, ... while a name is taken; null when no link
-// can be made at all.
+// Hard-link source at dest, or at dest-2, dest-3, ... up to dest-100 while a name is taken; null
+// when no link can be made, or every one of those names is taken. The bound matters because a
+// hook's time limit doesn't count the time its mods API calls take.
 async function linkFree($, source, dest) {
   const stem = dest.slice(0, -'.md'.length)
-  for (let n = 1; ; n += 1) {
+  for (let n = 1; n <= ARCHIVE_NAMES; n += 1) {
     const target = n === 1 ? dest : `${stem}-${n}.md`
     const linked = await tryLink($, source, target)
     if (linked === 'linked') return target
     if (linked === 'failed') return null
   }
+  return null
 }
 
 // 'linked', 'taken' when something is already at target, or 'failed', which includes not being
