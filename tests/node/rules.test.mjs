@@ -109,5 +109,9 @@ test('each archive outcome tells the user and Claude what happened, and delivers
   const gone = deliveredTexts({ ...facts, outcome: 'gone', place: null })
   assert.equal(gone.context, null)
   assert.equal(gone.banner, "handoff-before-clear.md was gone before your first message, so Claude didn't get it.")
+  const earlier = deliveredTexts({ outcome: 'earlier-run' })
+  assert.equal(earlier.context, null)
+  assert.equal(earlier.banner, "This session's handoff record is from an earlier run of Torch, so Torch didn't "
+    + 'give Claude a handoff or move one with this message. Run /torch:load-handoff if you need it.')
   assert.throws(() => deliveredTexts({ ...facts, outcome: 'surprise' }), /unknown archive outcome/)
 })

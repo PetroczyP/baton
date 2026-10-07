@@ -115,7 +115,6 @@ test('an existing archive is never overwritten', async (t) => {
 })
 
 test('a session record that is not valid is reported once and never stops the message', async (t) => {
-  const good = (w) => ({ handoff: w.handoff, sha256: 'x', archiveTo: path.join(w.archiveDir, 'a.md'), savedTs: Date.now() / 1000, drift: ['clean'], at: Date.now() })
   const broken = {
     'no archive path': (r) => ({ ...r, archiveTo: undefined }),
     'no save time': (r) => ({ ...r, savedTs: undefined }),
@@ -127,7 +126,8 @@ test('a session record that is not valid is reported once and never stops the me
   for (const [label, breakIt] of Object.entries(broken)) {
     await t.test(label, async (st) => {
       const { w } = await announced(st)
-      await w.host.$.store.set(`session:${SESSION}`, breakIt(good(w)))
+      const key = `session:${SESSION}`
+      await w.host.$.store.set(key, breakIt(await w.host.$.store.get(key)))
       const out = await w.prompt()
       assert.deepEqual(out.lines, ['could not deliver the handoff: the session record is not valid'])
       assert.deepEqual(out.result, { text: 'carry on', context: undefined, origin: { kind: 'composer' } })
@@ -205,6 +205,80 @@ test('a first load-handoff whose record could not be deleted still leaves the fi
   assert.deepEqual([next.banner, next.context], ['', ''])
   assert.ok(fs.existsSync(w.handoff), 'the file stays with the skill')
   assert.deepEqual(w.archived(), [])
+})
+
+const EARLIER_RUN = "This session's handoff record is from an earlier run of Torch, so Torch didn't give Claude "
+  + 'a handoff or move one with this message. Run /torch:load-handoff if you need it.'
+
+test('a record this run of Torch did not write is never acted on, and the user is told', async (t) => {
+  const cases = {
+    'Torch reloaded, or the session resumed in a new process': (w) => w.restart(),
+    'a record with no run id': async (w) => {
+      const key = `session:${SESSION}`
+      const { run, ...rest } = await w.host.$.store.get(key)
+      await w.host.$.store.set(key, rest)
+    },
+    "a record as Torch 2.0.0 wrote it": async (w) => {
+      const key = `session:${SESSION}`
+      const { handoff, sha256, archiveTo, at } = await w.host.$.store.get(key)
+      await w.host.$.store.set(key, { handoff, sha256, archiveTo, at })
+    },
+  }
+  for (const [label, prepare] of Object.entries(cases)) {
+    await t.test(label, async (st) => {
+      const { w } = await announced(st)
+      await prepare(w)
+      const runs = []
+      w.host.intercept.run = (argv, real) => { runs.push(argv[0]); return real() }
+      const out = await w.prompt('continue')
+      assert.deepEqual([out.lines, out.context], [[EARLIER_RUN], ''])
+      assert.deepEqual(out.result, { text: 'continue', context: undefined, origin: { kind: 'composer' } })
+      assert.deepEqual(runs, [], 'nothing is moved')
+      assert.ok(fs.existsSync(w.handoff))
+      assert.deepEqual(w.archived(), [])
+      assert.deepEqual(await w.host.$.store.keys(), [], 'the record is deleted')
+    })
+  }
+})
+
+test('a session resumed after its record could not be deleted never acts on it', async (t) => {
+  for (const first of ['go', '/torch:load-handoff']) {
+    await t.test(first, async (st) => {
+      const { w } = await announced(st)
+      const remove = w.host.$.store.delete
+      w.host.$.store.delete = async () => { throw new Error('the store is busy') }
+      const failed = await w.prompt(first)
+      w.host.$.store.delete = remove
+      assert.deepEqual(failed.lines, ['could not deliver the handoff: the store is busy'])
+      await w.restart()
+      const resumed = await w.prompt('keep going')
+      assert.deepEqual([resumed.lines, resumed.context], [[EARLIER_RUN], ''])
+      assert.ok(fs.existsSync(w.handoff), 'the file stays where the user was told it is')
+      assert.deepEqual(w.archived(), [])
+      assert.deepEqual(await w.host.$.store.keys(), [])
+    })
+  }
+})
+
+test('load-handoff after a restart is left to the skill, and says nothing', async (t) => {
+  const { w } = await announced(t)
+  await w.restart()
+  const out = await w.prompt('/torch:load-handoff')
+  assert.deepEqual([out.lines, out.context], [[], ''])
+  assert.ok(fs.existsSync(w.handoff))
+  assert.deepEqual(await w.host.$.store.keys(), [])
+})
+
+test('after a restart, a new session announces and delivers as usual, under a new run id', async (t) => {
+  const { w } = await announced(t)
+  const before = (await w.host.$.store.get(`session:${SESSION}`)).run
+  await w.restart()
+  const other = '44444444-0000-0000-0000-000000000000'
+  await w.start({ source: 'clear', session: other })
+  assert.notEqual((await w.host.$.store.get(`session:${other}`)).run, before)
+  const out = await w.prompt('continue')
+  assert.match(out.context, /Ship the widget\./)
+  assert.equal(w.archived().length, 1)
 })
 
 test('a failure while announcing is logged and the session starts', async (t) => {

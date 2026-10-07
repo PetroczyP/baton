@@ -90,6 +90,12 @@ export async function fixture(t) {
       }, { env: replacement, core })
     },
 
+    // Torch reloads, or Claude Code restarts and the session is resumed: a new instance of the
+    // module, with the same store and session.
+    restart() {
+      return world.host.reload(MODULE)
+    },
+
     // A message in the current session, by default typed by the user. The core stands for Claude
     // Code taking the message in: it answers with the message as it arrived.
     prompt(text = 'carry on', { session, origin = 'composer', context, core } = {}) {

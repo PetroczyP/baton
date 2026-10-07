@@ -376,7 +376,8 @@ test('the session record holds only what the README lists, and no handoff text',
   w.writeHandoff(handoffText({ head: sha, body: 'SECRET-BODY-TEXT' }))
   await w.start()
   const record = await w.host.$.store.get(`session:${SESSION}`)
-  assert.deepEqual(Object.keys(record).sort(), ['archiveTo', 'at', 'drift', 'handoff', 'savedTs', 'sha256'])
+  assert.deepEqual(Object.keys(record).sort(), ['archiveTo', 'at', 'drift', 'handoff', 'run', 'savedTs', 'sha256'])
+  assert.match(record.run, /^[0-9a-f]{32}$/)
   assert.doesNotMatch(JSON.stringify(record), /SECRET-BODY-TEXT/)
 })
 

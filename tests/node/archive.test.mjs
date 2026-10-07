@@ -179,9 +179,14 @@ test('a failed mv with the handoff still in place leaves it untouched', async (t
   assert.deepEqual(claims(), [])
 })
 
+// The user's first message after the session announced LOADED, on a system without hard links.
+// The announcement is real, so the record carries this run of Torch; the test then fixes what the
+// record says was announced and where it goes.
 async function submitWithoutHardLinks(w, live, dest, claims) {
-  w.host.session.id = SESSION
-  await w.host.$.store.set(`session:${SESSION}`, {
+  await w.start()
+  const key = `session:${SESSION}`
+  await w.host.$.store.set(key, {
+    ...(await w.host.$.store.get(key)),
     handoff: live, sha256: sha(LOADED), archiveTo: dest, savedTs: Date.now() / 1000, drift: ['not a git repo'], at: Date.now(),
   })
   const runs = w.host.intercept.run

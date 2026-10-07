@@ -226,6 +226,13 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
     module.register(on, {})
   }
 
+  // A new instance of the module in place of the current one, with the same store: what
+  // `/reload-plugins` does, and what a new Claude Code process resuming a session finds.
+  async function reload(modulePath) {
+    hooks.length = 0
+    await load(modulePath)
+  }
+
   // Run `body` with the host's environment replaced, as one hook run in v1 got its own env.
   async function withEnv(replacement, body) {
     const saved = currentEnv
@@ -237,5 +244,5 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
     }
   }
 
-  return { $, on, fire, load, withEnv, store, logs, intercept, session, get env() { return currentEnv } }
+  return { $, on, fire, load, reload, withEnv, store, logs, intercept, session, get env() { return currentEnv } }
 }
