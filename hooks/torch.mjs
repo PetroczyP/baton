@@ -108,7 +108,9 @@ async function announce($, e) {
   }
 
   const drift = driftParts(status, isRepo, fields)
-  const archiveTo = await freeArchivePath($, root, savedTs)
+  // The archive name by the save time; if it is taken when the first message comes, archive() moves
+  // on to -2, -3 and so on.
+  const archiveTo = joinPath(joinPath(root, ARCHIVE_DIR), `${archiveStamp(savedTs)}.md`)
   const recorded = await recordSession($, usableSessionId(e.session_id), {
     handoff, sha256: await sha256Hex(bytes), archiveTo, savedTs, drift, at: Date.now(),
   })
@@ -215,14 +217,6 @@ async function gitOutput(running) {
     return null
   }
   return run.exitCode === 0 && !run.isStdoutTruncated ? run.stdout : null
-}
-
-async function freeArchivePath($, root, savedTs) {
-  const folder = joinPath(root, ARCHIVE_DIR)
-  const stamp = archiveStamp(savedTs)
-  let candidate = joinPath(folder, `${stamp}.md`)
-  for (let n = 2; await $.fs.exists(candidate); n += 1) candidate = joinPath(folder, `${stamp}-${n}.md`)
-  return candidate
 }
 
 async function readBytes($, file) {

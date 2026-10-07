@@ -481,7 +481,7 @@ test('when the store refuses the record, the user is told to load the handoff by
   assert.equal(out.context, '')
   assert.ok(fs.existsSync(w.handoff))
 })
-test('an archive name taken before the session started is skipped in the announcement', async (t) => {
+test('an archive name taken before the first message is skipped, never replaced', async (t) => {
   const w = await fixture(t)
   const sha = w.initRepo()
   const saved = iso()
