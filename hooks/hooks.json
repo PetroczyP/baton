@@ -1,27 +1,4 @@
 {
-  "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "startup|clear",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
-            "timeout": 15
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt-submit.sh\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ]
-  }
+  "description": "Torch: load the project's handoff into each new session, and archive it on the first message.",
+  "modules": ["./torch.mjs"]
 }
