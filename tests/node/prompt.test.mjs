@@ -105,10 +105,9 @@ test('an existing archive is never overwritten', async (t) => {
 
 test('a corrupt session record is reported once and never blocks', async (t) => {
   const { w } = await loaded(t)
-  await w.host.$.store.set(`session:${SESSION}`, 'not a record')
+  await w.host.$.store.set(`session:${SESSION}`, { handoff: w.handoff, sha256: 'x' })
   const out = await w.prompt()
-  assert.equal(out.lines.length, 1)
-  assert.match(out.banner, /^could not archive the handoff: /)
+  assert.deepEqual(out.lines, ['could not archive the handoff: the session record is not valid'])
   assert.equal(out.result?.block, undefined)
   const again = await w.prompt()
   assert.deepEqual([again.banner, again.context], ['', ''])
