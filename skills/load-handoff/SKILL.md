@@ -1,18 +1,18 @@
 ---
 name: load-handoff
-description: In Claude Code, load a saved handoff by hand. Reads handoff-before-clear.md, or the newest archived handoff when there is none, checks git drift, and confirms the next step before resuming. Use only when the user asks to load or reload a handoff, or to recover an archived one. Torch loads the handoff by itself at session start, so an ordinary "continue" needs no skill. Needs Claude Code with the user's project folder; not for claude.ai chat.
+description: In Claude Code, load a saved handoff by hand. Reads handoff-before-clear.md, or the newest archived handoff when there is none, checks git drift, and confirms the next step before resuming. Use only when the user asks to load or reload a handoff, or to recover an archived one. Torch delivers the handoff by itself with the user's first message, so an ordinary "continue" needs no skill. Needs Claude Code with the user's project folder; not for claude.ai chat.
 ---
 
 This skill needs Claude Code working in the user's own project folder on their machine. If you are not in Claude Code with that folder (for example in claude.ai chat or a temporary sandbox), tell the user Torch needs Claude Code and stop.
 
-If this session already received the handoff at session start (Torch's message says so) and the user only asks to continue, don't use this skill: continue from the handoff you have.
+If this session already received the handoff with an earlier message (Torch's context says so) and the user only asks to continue, don't use this skill: continue from the handoff you have.
 
 Resume the work described in `handoff-before-clear.md` without losing continuity.
 
 ## Locate and read the handoff
 
 1. Determine the project root: `git rev-parse --show-toplevel`, else the current working directory.
-2. Read `<project-root>/handoff-before-clear.md` from disk, even when this session's context already holds a handoff added at session start: another session may have saved a newer one since, and the file you resume must be the file you archive.
+2. Read `<project-root>/handoff-before-clear.md` from disk, even when this session's context already holds a handoff Torch attached to an earlier message: another session may have saved a newer one since, and the file you resume must be the file you archive.
 3. If the file is missing, look in two places, newest file first:
    - `<project-root>/.handoff-claim-*.md`: a handoff Torch left at a temporary path when it couldn't finish archiving it or removing that temporary name, so a copy may also be in the archive. Tell the user it was left at that path and when it was saved.
    - the most recently modified `.md` file in `<project-root>/.claude/handoff-archive/`: a handoff that was archived although its work may never have happened, for example by a session closed right after its first message. Tell the user it comes from the archive and when it was saved.
