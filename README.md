@@ -1,6 +1,6 @@
 # Torch
 
-Torch passes your work from one Claude Code session to the next. Run `/torch:save-handoff` before you stop. When you next start Claude Code in that project, or after `/clear`, a one-line banner shows that the handoff is there, when it was saved and what changed in git since. Your first message brings it to Claude and moves it into an archive, so the session after that starts fresh.
+Torch passes your work from one Claude Code session to the next. Run `/torch:save-handoff` before you stop. When you next start Claude Code in that project, or after `/clear`, a one-line banner shows that the handoff is there, when it was saved and what changed in git since. Your first message brings it to Claude and moves it into an archive, so the session after that starts fresh. This automatic loading runs on macOS and Linux, not on Windows.
 
 Without Torch you would type a load command, confirm it, and choose whether to archive the file, every time. With Torch you just start working.
 
