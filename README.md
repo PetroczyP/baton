@@ -22,6 +22,34 @@ UserPromptSubmit says: Handoff archived to /path/to/project/.claude/handoff-arch
 2. **Context is running low mid-task.** Type `/torch:save-handoff`, then `/clear`. The fresh context starts with the handoff loaded, and you carry on.
 3. **You closed a session right after your first message.** That first message archived the handoff, but the work never happened. Type `/torch:load-handoff` in a new session. It offers the newest archived handoff, checks git drift and asks before resuming. Alternatively, `claude --continue` reopens the earlier session with the handoff still in its context.
 
+## Try it
+
+1. Start Claude Code with Torch installed, in any git repository, and ask for something small.
+2. Type `/torch:save-handoff`. Claude writes `handoff-before-clear.md` at the project root.
+3. Type `/exit`, then start `claude` again in the same folder. The banner appears, and the handoff is in the session's context.
+4. Type "continue". Claude picks up from the handoff, and the handoff moves to `.claude/handoff-archive/`.
+
+To try it with the sample instead:
+
+1. Copy [examples/handoff-before-clear.example.md](examples/handoff-before-clear.example.md) to a project root as `handoff-before-clear.md`.
+2. Set its `saved_at` to the current time, the output of `date -u +%Y-%m-%dT%H:%M:%SZ`. A handoff saved more than 14 days ago is announced, not loaded.
+
+## What Torch tells Claude
+
+Along with the handoff text, the session-start hook adds these instructions to Claude's context:
+
+> - Wait for the user's first message. If it continues this work, pick up from the handoff without asking the user to confirm, and first mention any drift above in one line.
+> - If the message is about something else, leave the handoff aside.
+> - Claude wrote it for the user at the end of the last session; the user's messages take precedence over it.
+
+They are preceded by:
+
+- the handoff's path and save time
+- the git drift summary
+- where the file moves on the first message
+
+A handoff too large to include is replaced by its path and an instruction to read it before acting on it. On the first message, the prompt hook adds one line saying where the handoff was archived, or that the file changed since it was loaded and is not the loaded handoff.
+
 ## How it decides
 
 1. **Only the newest handoff is loaded.** That's `handoff-before-clear.md` at the project root, the git top level or else the folder you started in. Each save overwrites it. The archive is never read automatically, and neither is another project's handoff.

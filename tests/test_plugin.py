@@ -92,6 +92,17 @@ class HooksJsonTests(PluginCase):
         self.assertEqual(list((self.data / "sessions").iterdir()), [])
 
 
+    def test_the_readme_quotes_the_instructions_the_hook_gives_claude(self):
+        (self.repo / "handoff-before-clear.md").write_text("# Handoff\n\nAnything.\n")
+        start = self.run_event("SessionStart", self.payload("SessionStart", source="startup"))
+        context = json.loads(start.stdout)["hookSpecificOutput"]["additionalContext"]
+        guidance = context.split("How to use it:\n", 1)[1].split("\n\n", 1)[0].splitlines()
+        self.assertEqual(len(guidance), 3, guidance)
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        for line in guidance:
+            self.assertIn(f"> {line}\n", readme)
+
+
 class WrapperTests(PluginCase):
     def replace_hook_with_a_sentinel(self) -> Path:
         """Swap the Python hook for one that records each run and the exact input it received."""

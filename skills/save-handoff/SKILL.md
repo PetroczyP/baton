@@ -1,6 +1,6 @@
 ---
 name: save-handoff
-description: In Claude Code, save the current session's state (goal, progress, files, git state, open decisions) to handoff-before-clear.md in the project so the next session can resume. Use when the user asks to save, wrap up, checkpoint or pause work, mentions /clear or /compact, or says context is running low. Needs Claude Code with the user's project folder; not for claude.ai chat.
+description: In Claude Code, save the current session's state (goal, progress, files, git state, open decisions) to handoff-before-clear.md in the project so the next session can resume. Use when the user asks to save a handoff, or asks to save their progress before stopping, running /clear or compacting. Needs Claude Code with the user's project folder; not for claude.ai chat.
 ---
 
 This skill needs Claude Code working in the user's own project folder on their machine. If you are not in Claude Code with that folder (for example in claude.ai chat or a temporary sandbox), tell the user Torch needs Claude Code and stop.
