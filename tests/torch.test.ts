@@ -1,8 +1,9 @@
-// Torch in Claude Code's own engine, through `claude plugin test`: the module loads, its hooks
-// get the events and filters they should, results from other hooks pass through, and a refused
-// call ends in a logged failure, never a blocked event. Every file and process call is answered
-// here from an in-memory project, so what these tests prove is the wiring; tests/node checks the
-// behaviour against a real file system and real git.
+// Torch in Claude Code's own engine, through `claude plugin test`: the module loads, its hooks get
+// the events and filters they should, the session start passes through untouched, the user's
+// first message carries Torch's context down the prompt chain, and a refused call ends in a
+// logged failure, never a blocked event. Every file and process call is answered here from an
+// in-memory project, so what these tests prove is the wiring; tests/node checks the behaviour
+// against a real file system and real git.
 import { expect, test } from 'claude-code/testing'
 
 const ROOT = '/work'
@@ -16,8 +17,8 @@ function startEvent(source: string) {
   return { session_id: SESSION, cwd: ROOT, source, hook_event_name: 'SessionStart', transcript_path: '/t.jsonl' }
 }
 
-function promptEvent(prompt: string) {
-  return { session_id: SESSION, cwd: ROOT, prompt, hook_event_name: 'UserPromptSubmit', transcript_path: '/t.jsonl' }
+function message(text: string, origin = 'composer', context?: string[]) {
+  return { text, wait: false, origin: { kind: origin }, ...(context ? { context } : {}) }
 }
 
 // Stubs for every call Torch makes, over an in-memory project folder that is not a git repo.
@@ -27,6 +28,8 @@ function project(on: any, files: Files, { denyStat = false } = {}) {
   const runs: string[][] = []
   const exists = (path: string) => files.has(path) || [...files.keys()].some((name) => name.startsWith(`${path}/`))
   on('env.get', ($: any, e: any) => ({ value: e.name === 'CLAUDE_CODE_ENTRYPOINT' ? 'cli' : '1' }))
+  on('session.id', () => ({ value: SESSION }))
+  on('session.cwd', () => ({ value: ROOT }))
   on('ui.log', ($: any, e: any) => {
     logs.push(e.text)
     return { value: undefined }
@@ -77,77 +80,81 @@ function project(on: any, files: Files, { denyStat = false } = {}) {
 const handoff = (body: string) => `---\nhandoff: 1\nsaved_at: ${new Date().toISOString().replace(/\.\d{3}Z$/, 'Z')}\n`
   + `branch: main\nhead: none\n---\n# Handoff — test\n\n${body}\n`
 
-test('only startup and clear load the handoff', async ($, on) => {
+test('only startup and clear announce the handoff', async ($, on) => {
   const files: Files = new Map([[HANDOFF, handoff('Ship it.')]])
   const world = project(on, files)
   on('classic.SessionStart', () => ({}))
-  for (const source of ['resume', 'compact', 'fork']) {
-    const result = await $.classic.SessionStart(startEvent(source))
-    expect(result.additionalContext).toBeUndefined()
-  }
+  for (const source of ['resume', 'compact', 'fork']) await $.classic.SessionStart(startEvent(source))
   expect(world.logs).toEqual([])
-  const loaded = await $.classic.SessionStart(startEvent('clear'))
-  expect(loaded.additionalContext?.[0]).toContain('Ship it.')
+  expect([...world.store.keys()]).toEqual([])
+  await $.classic.SessionStart(startEvent('clear'))
+  expect(world.logs[0]).toMatch(/^Handoff ready: /)
+  expect([...world.store.keys()]).toEqual([`session:${SESSION}`])
 })
 
-test('a handoff loads beside other context, then archives on the first prompt', async ($, on) => {
+test('the session start passes through untouched; the first message carries the handoff beside other context', async ($, on) => {
   const files: Files = new Map([[HANDOFF, `${BOM}${handoff('Ship the green widget.')}`]])
   const world = project(on, files)
-  on('classic.SessionStart', () => ({ additionalContext: ['from a settings hook'], sessionTitle: 'kept' }))
-  on('classic.UserPromptSubmit', () => ({ additionalContext: ['from a prompt hook'] }))
+  const settings = { additionalContext: ['from a settings hook'], sessionTitle: 'kept' }
+  on('classic.SessionStart', () => settings)
+  let carried: string[] | undefined
+  on('prompt.submit', ($: any, e: any) => {
+    carried = e.context
+    return { text: e.text, context: e.context, origin: e.origin }
+  })
 
   const start = await $.classic.SessionStart(startEvent('startup'))
-  expect(start.sessionTitle).toBe('kept')
-  expect(start.additionalContext?.[0]).toBe('from a settings hook')
-  expect(start.additionalContext?.[1]).toContain('Ship the green widget.')
-  expect(start.additionalContext?.[1]).not.toContain(BOM)
-  expect(world.logs[0]).toMatch(/^Handoff loaded: saved .* · not a git repo\. Archived after your first message\.$/)
-  expect([...world.store.keys()]).toEqual([`session:${SESSION}`])
+  expect(start).toEqual(settings)
+  expect(world.logs[0]).toMatch(/^Handoff ready: saved .* · not a git repo\. Claude gets it with your first message, which archives it\.$/)
 
-  const prompt = await $.classic.UserPromptSubmit(promptEvent('carry on'))
-  expect(prompt.additionalContext?.[0]).toBe('from a prompt hook')
-  expect(prompt.additionalContext?.[1]).toMatch(/^The auto-loaded handoff is now archived at \/work\/\.claude\/handoff-archive\//)
+  const first = await $.prompt.submit(message('carry on', 'composer', ['from a prompt hook']))
+  expect(first.text).toBe('carry on')
+  expect(carried?.[0]).toBe('from a prompt hook')
+  expect(carried?.[1]).toContain('Ship the green widget.')
+  expect(carried?.[1]).not.toContain(BOM)
+  expect(carried?.[1]).toMatch(/It is now archived at \/work\/\.claude\/handoff-archive\/\d{8}T\d{6}Z\.md\./)
   expect(world.logs[1]).toMatch(/^Handoff archived to \/work\/\.claude\/handoff-archive\/\d{8}T\d{6}Z\.md$/)
   expect(files.has(HANDOFF)).toBe(false)
   expect([...world.store.keys()]).toEqual([])
 })
 
-test('a blocked first prompt keeps the block and leaves the handoff for the next one', async ($, on) => {
-  const files: Files = new Map([[HANDOFF, handoff('Wait for me.')]])
+test('a notification is not the first message; the user\'s next one is', async ($, on) => {
+  const files: Files = new Map([[HANDOFF, handoff('Wait for the user.')]])
   const world = project(on, files)
-  let prompts = 0
   on('classic.SessionStart', () => ({}))
-  on('classic.UserPromptSubmit', () => (prompts++ === 0 ? { block: 'not now' } : {}))
-
+  const carried: (string[] | undefined)[] = []
+  on('prompt.submit', ($: any, e: any) => {
+    carried.push(e.context)
+    return { text: e.text, context: e.context, origin: e.origin }
+  })
   await $.classic.SessionStart(startEvent('startup'))
-  const blocked = await $.classic.UserPromptSubmit(promptEvent('go'))
-  expect(blocked.block).toBe('not now')
+  await $.prompt.submit(message('a task finished', 'task-notification'))
+  expect(carried[0]).toBeUndefined()
   expect(files.has(HANDOFF)).toBe(true)
   expect(world.runs).toEqual([])
-
-  await $.classic.UserPromptSubmit(promptEvent('go'))
+  await $.prompt.submit(message('continue'))
+  expect(carried[1]?.[0]).toContain('Wait for the user.')
   expect(files.has(HANDOFF)).toBe(false)
 })
 
-test('a block with an empty reason is still a block', async ($, on) => {
-  const files: Files = new Map([[HANDOFF, handoff('Wait for me too.')]])
+test('a later hook\'s refusal of the first message passes back untouched', async ($, on) => {
+  const files: Files = new Map([[HANDOFF, handoff('Refused.')]])
   const world = project(on, files)
   on('classic.SessionStart', () => ({}))
-  on('classic.UserPromptSubmit', () => ({ block: '' }))
+  on('prompt.submit', () => ({ drop: 'not now' }))
   await $.classic.SessionStart(startEvent('startup'))
-  const blocked = await $.classic.UserPromptSubmit(promptEvent('go'))
-  expect(blocked.block).toBe('')
-  expect(files.has(HANDOFF)).toBe(true)
-  expect(world.runs).toEqual([])
-  expect([...world.store.keys()]).toEqual([`session:${SESSION}`])
+  const refused = await $.prompt.submit(message('go'))
+  expect(refused).toEqual({ drop: 'not now' })
+  expect(world.logs[1]).toMatch(/^Handoff archived to /)
 })
 
 test('a refused call is logged and the session starts with the other hooks\' result', async ($, on) => {
   const files: Files = new Map([[HANDOFF, handoff('Unreachable.')]])
   const world = project(on, files, { denyStat: true })
-  on('classic.SessionStart', () => ({ additionalContext: ['other'] }))
+  const settings = { additionalContext: ['other'] }
+  on('classic.SessionStart', () => settings)
   const result = await $.classic.SessionStart(startEvent('startup'))
-  expect(result.additionalContext).toEqual(['other'])
+  expect(result).toEqual(settings)
   expect(world.logs.length).toBe(1)
-  expect(world.logs[0]).toMatch(/^could not load the handoff: .*a policy mod refused it/)
+  expect(world.logs[0]).toMatch(/^could not announce the handoff: .*a policy mod refused it/)
 })

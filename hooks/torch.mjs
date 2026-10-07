@@ -1,32 +1,47 @@
-// Torch, a Claude Code mod: loads the project's handoff-before-clear.md into each new
-// interactive session, and moves it into .claude/handoff-archive/ on the session's first
-// message so the next session starts fresh.
+// Torch, a Claude Code mod: finds the project's handoff-before-clear.md when a new interactive
+// session starts, gives it to Claude with the user's first message, and moves it into
+// .claude/handoff-archive/ at that moment, so the next session starts fresh.
 //
-//   classic.SessionStart (startup, clear)  adds the handoff to Claude's context and logs a
-//                                          one-line banner with the git drift since the save
-//   classic.UserPromptSubmit               archives the loaded handoff on the first prompt,
-//                                          unless that prompt is /torch:load-handoff
+//   classic.SessionStart (startup, clear)  checks the handoff, records it for this session and
+//                                          logs a one-line banner with the git drift since the
+//                                          save; it passes the event on unchanged
+//   prompt.submit                          on the session's first message from the user,
+//                                          archives the handoff and attaches it to that message
+//                                          as context, unless the message is /torch:load-handoff
 //
 // Every function that is handed `$` is declared in this file, as `claude plugin validate`
-// requires; rules.mjs holds the rules that need no file or process access. Torch never blocks
-// an event: a failure is logged and the event goes on.
+// requires; rules.mjs holds the rules that need no file or process access. Torch never answers
+// or blocks an event: each hook ends in `next(e)` or `next({ ...e, context })`, and a failure is
+// logged while the event goes on.
 import {
   ARCHIVE_DIR, HANDOFF_NAME, MAX_AGE_DAYS, READ_LIMIT, RECORD_MAX_AGE_DAYS, REFUSALS,
-  ancestors, archiveStamp, archivedTexts, base64ToBytes, contractFields, driftParts, hasTitle,
-  humanAge, isOtherHost, isRecord, joinPath, loadedTexts, localTime, parentPath, parseStatus,
-  randomHex, sha256Hex, usableSessionId,
+  ancestors, announcedBanner, archiveStamp, base64ToBytes, contractFields, deliveredTexts,
+  driftParts, hasTitle, humanAge, isOtherHost, isRecord, joinPath, localTime, parentPath,
+  parseStatus, randomHex, sha256Hex, usableSessionId,
 } from './rules.mjs'
 
 const GIT_TIMEOUT_MS = 5_000
 const CLAIM_PREFIX = '.handoff-claim-'
 const RECORD_PREFIX = 'session:'
 const LOAD_SKILL = /^\s*\/(?:torch:)?load-handoff(\s|$)/
+const USER_ORIGINS = new Set(['composer', 'bridge'])
+
+// Sessions that have had their first message from the user, kept for the life of the module. A
+// message of a session already here passes on unchanged, whether it overlaps the first or comes
+// after a first message whose record could not be deleted, so a session acts at most once in
+// this run of Torch.
+const answered = new Set()
+
+// This run of Torch, from the module's load to its next reload or the end of the process. Records
+// carry it, and only the run that announced a handoff acts on it, so a record that outlived the
+// set above, after a reload or in a session resumed in a new process, is never acted on.
+const RUN = randomHex(16)
 
 export function register(on) {
-  on('classic.SessionStart', { source: ['startup', 'clear'] }, loadHandoff)
-    .catch(($, e, next) => reportFailure($, 'load', e, next))
-  on('classic.UserPromptSubmit', archiveOnFirstPrompt)
-    .catch(($, e, next) => reportFailure($, 'archive', e, next))
+  on('classic.SessionStart', { source: ['startup', 'clear'] }, announceHandoff)
+    .catch(($, e, next) => reportFailure($, 'announce', e, next))
+  on('prompt.submit', deliverHandoff)
+    .catch(($, e, next) => reportFailure($, 'deliver', e, next))
 }
 
 // A failed hook is logged, and the event continues: with the result `next` already gave, or
@@ -36,61 +51,48 @@ export async function reportFailure($, verb, e, next) {
   return next.called ? undefined : next(e)
 }
 
-export async function loadHandoff($, e, next) {
-  const result = await next(e)
-  const context = await handoffContext($, e)
-  if (context === null) return result
-  return { ...result, additionalContext: [...(result?.additionalContext ?? []), context] }
+export async function announceHandoff($, e, next) {
+  await announce($, e)
+  return next(e)
 }
 
-export async function archiveOnFirstPrompt($, e, next) {
-  const result = await next(e)
-  const sessionId = usableSessionId(e.session_id)
-  // A session on an unsupported platform never loaded a handoff, so it has nothing to archive.
-  if (sessionId === null || (typeof e.cwd === 'string' && !e.cwd.startsWith('/'))) return result
-  const key = RECORD_PREFIX + sessionId
-  const record = await $.store.get(key)
-  // A prompt another hook blocked never reached Claude: the record waits for the next one.
-  if (record === undefined || result?.block !== undefined) return result
-  // Delete the record before acting: whatever happens next, this session tries at most once.
-  await $.store.delete(key)
-  if (LOAD_SKILL.test(typeof e.prompt === 'string' ? e.prompt : '')) return result
-  if (!isRecord(record)) throw new Error('the session record is not valid')
-  const outcome = await archive($, record.handoff, record.sha256, record.archiveTo)
-  const texts = archivedTexts({ ...outcome, handoff: record.handoff })
-  if (texts === null) return result
-  $.ui.log(texts.banner)
-  return { ...result, additionalContext: [...(result?.additionalContext ?? []), texts.context] }
+export async function deliverHandoff($, e, next) {
+  const context = await firstMessageContext($, e)
+  if (context === null) {
+    return next(e)
+  }
+  return next({ ...e, context: [...(e.context ?? []), context] })
 }
 
-// The context to add for this session's handoff, or null. Refusals are logged as banners.
-async function handoffContext($, e) {
-  if (await isSkippedSession($)) return null
+// Check this session's handoff, record it for the first message and log the banner; refusals are
+// logged as banners too.
+async function announce($, e) {
+  if (await isSkippedSession($)) return
   const cwd = typeof e.cwd === 'string' && e.cwd ? e.cwd : await $.session.cwd()
   if (!cwd.startsWith('/')) {
     $.ui.log(REFUSALS.platform)
-    return null
+    return
   }
   await removeStaleRecords($)
   const { root, isRepo } = await projectRoot($, cwd)
   const handoff = joinPath(root, HANDOFF_NAME)
   const stat = (await $.fs.exists(handoff)) ? await $.fs.stat(handoff) : await brokenLink($, handoff)
-  if (stat === null) return null
+  if (stat === null) return
   if (stat.isLink) {
     $.ui.log(REFUSALS.symlink)
-    return null
+    return
   }
-  if (stat.kind !== 'file') return null
+  if (stat.kind !== 'file') return
   if (stat.size > READ_LIMIT) {
     $.ui.log(REFUSALS.tooLarge)
-    return null
+    return
   }
 
   const bytes = await readBytes($, handoff)
   const text = new TextDecoder().decode(bytes)
   if (!hasTitle(text)) {
     $.ui.log(REFUSALS.untitled)
-    return null
+    return
   }
   const fields = contractFields(text)
   const savedTs = fields ? fields.savedTs : stat.mtimeMs / 1000
@@ -99,27 +101,60 @@ async function handoffContext($, e) {
   const age = humanAge(ageSeconds)
   if (ageSeconds > MAX_AGE_DAYS * 86_400) {
     $.ui.log(REFUSALS.old(saved, age))
-    return null
+    return
   }
 
   const status = isRepo ? await repoStatus($, root) : null
   if (status !== null && status.handoffTracked === null) {
     $.ui.log(REFUSALS.unknownTracked)
-    return null
+    return
   }
   if (status !== null && status.handoffTracked) {
     $.ui.log(REFUSALS.tracked)
-    return null
+    return
   }
 
   const drift = driftParts(status, isRepo, fields)
-  const archiveTo = await freeArchivePath($, root, savedTs)
+  // The archive name by the save time; if it is taken when the first message comes, archive() moves
+  // on to -2, -3 and so on.
+  const archiveTo = joinPath(joinPath(root, ARCHIVE_DIR), `${archiveStamp(savedTs)}.md`)
   const recorded = await recordSession($, usableSessionId(e.session_id), {
-    handoff, sha256: await sha256Hex(bytes), archiveTo, at: Date.now(),
+    handoff, sha256: await sha256Hex(bytes), archiveTo, savedTs, drift, at: Date.now(), run: RUN,
   })
-  const { context, banner } = loadedTexts({ handoff, text, saved, age, drift, archiveTo, recorded })
-  $.ui.log(banner)
-  return context
+  $.ui.log(announcedBanner({ handoff, text, saved, age, drift, archiveTo, recorded }))
+}
+
+// The context for this message, or null when it passes on unchanged: it is not from the user, its
+// session has no record, it is not the session's first, it hands the file to /torch:load-handoff,
+// or another run of Torch wrote the record.
+// On the first message the handoff is archived first, so the context says where it now is.
+async function firstMessageContext($, e) {
+  if (!USER_ORIGINS.has(e.origin?.kind)) return null
+  const sessionId = usableSessionId(await $.session.id())
+  if (sessionId === null || answered.has(sessionId)) return null
+  answered.add(sessionId)
+  // A session on an unsupported platform never announced a handoff, so it has nothing to deliver.
+  if (!(await $.session.cwd()).startsWith('/')) return null
+  const key = RECORD_PREFIX + sessionId
+  const record = await $.store.get(key)
+  if (record === undefined) return null
+  // Delete the record before acting, so a later session never acts on it again.
+  await $.store.delete(key)
+  if (LOAD_SKILL.test(typeof e.text === 'string' ? e.text : '')) return null
+  if (record?.run !== RUN) {
+    $.ui.log(deliveredTexts({ outcome: 'earlier-run' }).banner)
+    return null
+  }
+  if (!isRecord(record)) throw new Error('the session record is not valid')
+  // Everything the report needs is worked out before a file moves.
+  const facts = {
+    handoff: record.handoff, saved: localTime(record.savedTs),
+    age: humanAge(Date.now() / 1000 - record.savedTs), drift: record.drift,
+  }
+  const outcome = await archive($, record.handoff, record.sha256, record.archiveTo)
+  const texts = deliveredTexts({ ...outcome, ...facts })
+  $.ui.log(texts.banner)
+  return texts.context
 }
 
 // The stat of a symbolic link that leads nowhere, which $.fs.exists reports as absent, or null
@@ -138,8 +173,8 @@ async function isSkippedSession($) {
   return isOtherHost(await $.env.get('CLAUDE_CODE_ENTRYPOINT'), await $.env.get('CLAUDE_CODE_SESSION_ATTENDED'))
 }
 
-// Whether this session now has a record to archive by. Without a usable id, or when the store
-// refuses the write, the handoff still loads and is left in place.
+// Whether this session now has a record to deliver by. Without a usable id, or when the store
+// refuses the write, nothing is delivered and the banner says to load the handoff by hand.
 async function recordSession($, sessionId, record) {
   if (sessionId === null) return false
   try {
@@ -168,37 +203,30 @@ async function projectRoot($, cwd) {
   return { root: chain[0], isRepo: false }
 }
 
-// Two git status calls side by side: the work tree without the handoff, a claim archive() left
-// and the archive folder, so archiving never counts as a change, and the handoff alone with ignored files shown, which
-// says whether it is tracked. Asking about ignored files for the whole tree would walk every
-// ignored folder.
+// Two git status calls side by side, run in the project root and written out in full: the work
+// tree without the handoff, a claim archive() left and the archive folder, so archiving never
+// counts as a change; and the handoff alone with ignored files shown, which says whether it is
+// tracked. Asking about ignored files for the whole tree would walk every ignored folder.
 async function repoStatus($, root) {
   const [tree, own] = await Promise.all([
-    gitOutput($, root, ['status', '--porcelain=v2', '--branch', '--untracked-files=normal', '--', '.',
-      `:(exclude)${HANDOFF_NAME}`, `:(exclude)${CLAIM_PREFIX}*.md`, `:(exclude)${ARCHIVE_DIR}`]),
-    gitOutput($, root, ['status', '--porcelain=v2', '--untracked-files=normal', '--ignored=traditional',
-      '--', HANDOFF_NAME]),
+    gitOutput($.process.run(['git', 'status', '--porcelain=v2', '--branch', '--untracked-files=normal',
+      '--', '.', ':(exclude)handoff-before-clear.md', ':(exclude).handoff-claim-*.md',
+      ':(exclude).claude/handoff-archive'], { cwd: root, timeoutMs: GIT_TIMEOUT_MS })),
+    gitOutput($.process.run(['git', 'status', '--porcelain=v2', '--untracked-files=normal',
+      '--ignored=traditional', '--', 'handoff-before-clear.md'], { cwd: root, timeoutMs: GIT_TIMEOUT_MS })),
   ])
   return parseStatus(tree, own)
 }
 
 // Git's complete standard output, or null when git failed, could not run or was cut short.
-async function gitOutput($, root, args) {
+async function gitOutput(running) {
   let run
   try {
-    run = await $.process.run(['git', '-C', root, ...args], { timeoutMs: GIT_TIMEOUT_MS })
+    run = await running
   } catch (error) {
     return null
   }
   return run.exitCode === 0 && !run.isStdoutTruncated ? run.stdout : null
-}
-
-async function freeArchivePath($, root, savedTs) {
-  const folder = joinPath(root, ARCHIVE_DIR)
-  const stamp = archiveStamp(savedTs)
-  let candidate = joinPath(folder, `${stamp}.md`)
-  for (let n = 2; await $.fs.exists(candidate); n += 1) candidate = joinPath(folder, `${stamp}-${n}.md`)
-  return candidate
 }
 
 async function readBytes($, file) {
@@ -206,27 +234,31 @@ async function readBytes($, file) {
   return base64ToBytes(base64)
 }
 
-// Move the loaded handoff into the archive without losing or replacing any file.
+// Move the announced handoff into the archive without losing or replacing any file.
 //
 // Renaming the live file to a private name beside it claims it: one rename in one folder,
 // atomic, and the file keeps its identity, so a save another session is still writing lands in
 // it. The claim is then hard-linked into place, back to the live path when it is not the
-// handoff this session loaded, otherwise into the archive, and only then is its private name
+// handoff this session announced, otherwise into the archive, and only then is its private name
 // removed. `link` never replaces a file. When no link can be made, the claim stays where it is:
-// "kept" when it is the loaded handoff, "kept-other" when it is a later save, "kept-unread"
-// when it could not be read to tell. Every outcome names where the file is.
+// "kept" when it is the announced handoff, "kept-other" when it is a later save, "kept-unread"
+// when it could not be read to tell. Every outcome names where the file is; "archived" and
+// "kept" also give the text that was read, which is the announced handoff's.
 export async function archive($, handoff, loadedSha, dest) {
-  await mustRun($, ['mkdir', '-p', '--', parentPath(dest)])
+  const made = await $.process.run(['mkdir', '-p', '--', '.claude/handoff-archive'], { cwd: parentPath(handoff) })
+  if (made.exitCode !== 0) throw new Error(`mkdir failed: ${made.stderr.trim()}`)
   const claim = joinPath(parentPath(handoff), `${CLAIM_PREFIX}${randomHex(16)}.md`)
   const failure = await claimFailure($, handoff, claim)
   if (failure === 'gone') return { outcome: 'gone', place: null }
 
-  let matched
+  let bytes
   try {
-    matched = (await sha256Hex(await readBytes($, claim))) === loadedSha
+    bytes = await readBytes($, claim)
   } catch (error) {
     return { outcome: 'kept-unread', place: claim }
   }
+  const matched = (await sha256Hex(bytes)) === loadedSha
+  const text = matched ? new TextDecoder().decode(bytes) : undefined
   let outcome
   let place = null
   if (matched) {
@@ -237,9 +269,11 @@ export async function archive($, handoff, loadedSha, dest) {
     if (back === 'taken') place = await linkFree($, claim, dest)
     outcome = back === 'linked' || place !== null ? 'changed' : 'kept-other'
   }
-  if (outcome === 'kept' || outcome === 'kept-other') return { outcome, place: claim }
+  if (outcome === 'kept') return { outcome, place: claim, text }
+  if (outcome === 'kept-other') return { outcome, place: claim }
   const leftover = await removeClaim($, claim)
-  return leftover === null ? { outcome, place } : { outcome, place, leftover }
+  const result = matched ? { outcome, place, text } : { outcome, place }
+  return leftover === null ? result : { ...result, leftover }
 }
 
 // Null once the handoff is claimed, 'gone' when it and the claim are both absent; throws when the
@@ -309,9 +343,4 @@ async function removeClaim($, claim) {
   } catch (error) {
     return claim
   }
-}
-
-async function mustRun($, argv) {
-  const run = await $.process.run(argv)
-  if (run.exitCode !== 0) throw new Error(`${argv[0]} failed: ${run.stderr.trim()}`)
 }

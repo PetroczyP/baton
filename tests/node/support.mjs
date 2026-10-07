@@ -68,32 +68,52 @@ export async function fixture(t) {
       return file
     },
 
-    // What one event left behind: the transcript lines it logged and the context it added.
-    async fire(event, payload, { env: replacement } = {}) {
+    // What one event left behind: the transcript lines it logged, and the context Torch added.
+    // A classic event's context is its result's additionalContext; a prompt.submit's is the
+    // context the message carried to the end of the chain.
+    async fire(event, payload, { env: replacement, core } = {}) {
       const before = host.logs.length
-      const run = () => host.fire(event, payload)
+      const run = () => host.fire(event, payload, core)
       const result = replacement ? await host.withEnv(replacement, run) : await run()
       const lines = host.logs.slice(before)
-      return {
-        result,
-        banner: lines.join('\n'),
-        lines,
-        context: (result?.additionalContext ?? []).join('\n'),
-      }
+      const context = event === 'prompt.submit' ? (result?.context ?? []) : (result?.additionalContext ?? [])
+      return { result, banner: lines.join('\n'), lines, context: context.join('\n') }
     },
 
-    start({ source = 'startup', cwd = repo, session = SESSION, env: replacement } = {}) {
+    // A new session (or /clear) in `cwd`: Torch announces the handoff.
+    start({ source = 'startup', cwd = repo, session = SESSION, env: replacement, core } = {}) {
+      host.session.id = session
+      host.session.cwd = cwd
       return world.fire('classic.SessionStart', {
         session_id: session, cwd, hook_event_name: 'SessionStart', source,
         transcript_path: path.join(home, 'transcript.jsonl'),
-      }, { env: replacement })
+      }, { env: replacement, core })
     },
 
-    prompt(text = 'carry on', { session = SESSION } = {}) {
-      return world.fire('classic.UserPromptSubmit', {
-        session_id: session, cwd: repo, hook_event_name: 'UserPromptSubmit', prompt: text,
-        transcript_path: path.join(home, 'transcript.jsonl'),
+    // Torch reloads, or Claude Code restarts and the session is resumed: a new instance of the
+    // module, with the same store and session.
+    restart() {
+      return world.host.reload(MODULE)
+    },
+
+    // A message in the current session, by default typed by the user. The core stands for Claude
+    // Code taking the message in: it answers with the message as it arrived.
+    prompt(text = 'carry on', { session, origin = 'composer', context, core } = {}) {
+      if (session !== undefined) host.session.id = session
+      const event = { text, wait: false, origin: { kind: origin }, ...(context ? { context } : {}) }
+      return world.fire('prompt.submit', event, {
+        core: core ?? (async (e) => ({ text: e.text, context: e.context, origin: e.origin })),
       })
+    },
+
+    // A session that starts and then gets the user's first message: what the user saw at the
+    // start (banner, lines) and what Claude got with the message (context), with the message's
+    // own report (delivered).
+    async load(options = {}) {
+      const { text = 'continue', ...startOptions } = options
+      const start = await world.start(startOptions)
+      const first = await world.prompt(text)
+      return { banner: start.banner, lines: start.lines, start, context: first.context, delivered: first }
     },
 
     archived() {

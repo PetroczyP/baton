@@ -24,12 +24,13 @@ test('hooks.json declares only the mod, and the plugin ships no scripts', () => 
   assert.deepEqual(scripts, [])
 })
 
-test('the mod loads and then archives a handoff', async (t) => {
+test('the mod announces a handoff, then delivers and archives it with the first message', async (t) => {
   const w = await fixture(t)
   w.writeHandoff('# Handoff\n\nShip the green widget.\n')
   const start = await w.start()
-  assert.match(start.context, /Ship the green widget\./)
+  assert.match(start.banner, /^Handoff ready: /)
   const submit = await w.prompt('go')
+  assert.match(submit.context, /Ship the green widget\./)
   assert.match(submit.banner, /^Handoff archived to /)
   assert.ok(!fs.existsSync(w.handoff))
   assert.deepEqual(await w.host.$.store.keys(), [])
@@ -38,7 +39,7 @@ test('the mod loads and then archives a handoff', async (t) => {
 test('the README quotes the instructions the mod gives Claude', async (t) => {
   const w = await fixture(t)
   w.writeHandoff('# Handoff\n\nAnything.\n')
-  const { context } = await w.start()
+  const { context } = await w.load()
   const guidance = context.split('How to use it:\n')[1].split('\n\n')[0].split('\n')
   assert.equal(guidance.length, 3, guidance.join('\n'))
   const readme = read('README.md')
@@ -84,5 +85,59 @@ test('no system files or oversized files', () => {
   for (const file of trackedFiles()) {
     assert.ok(!['.DS_Store', 'Thumbs.db', 'desktop.ini'].includes(path.basename(file)), file)
     assert.ok(fs.statSync(file).size < 256 * 1024, file)
+  }
+})
+
+// The directory reads the module without running it (spec R17, R18). These read it the same way.
+const source = read('hooks/torch.mjs')
+
+function functionBody(name) {
+  const start = source.indexOf(`export async function ${name}(`)
+  assert.ok(start >= 0, name)
+  return source.slice(start, source.indexOf('\n}\n', start))
+}
+
+test('each hook ends in a shape the directory reads', () => {
+  const returns = (name) => functionBody(name).split('\n').map((line) => line.trim()).filter((line) => line.startsWith('return'))
+  assert.deepEqual(returns('announceHandoff'), ['return next(e)'])
+  assert.deepEqual(returns('deliverHandoff'), [
+    'return next(e)',
+    'return next({ ...e, context: [...(e.context ?? []), context] })',
+  ])
+  assert.doesNotMatch(source, /classic\.UserPromptSubmit/)
+})
+
+// The arguments of each $.process.run call, up to its closing parenthesis.
+function processRunCalls() {
+  const calls = []
+  for (let at = source.indexOf('$.process.run('); at >= 0; at = source.indexOf('$.process.run(', at + 1)) {
+    let depth = 0
+    let end = at + '$.process.run'.length
+    do {
+      if (source[end] === '(') depth += 1
+      if (source[end] === ')') depth -= 1
+      end += 1
+    } while (depth > 0)
+    calls.push(source.slice(at, end))
+  }
+  return calls
+}
+
+test('no program the mod runs gets standard input', () => {
+  const calls = processRunCalls()
+  assert.equal(calls.length, 6)
+  for (const call of calls) assert.doesNotMatch(call, /stdin/, call)
+})
+
+test('the README lists every command the mod runs, as it runs it', () => {
+  const readme = read('README.md').replaceAll("'", '')
+  const calls = [...source.matchAll(/\$\.process\.run\(\[([^\]]*)\]/g)].map((m) => m[1])
+  assert.ok(calls.length >= 6, `${calls.length} calls`)
+  for (const call of calls) {
+    const tokens = [...call.matchAll(/'([^']*)'|([A-Za-z_$][\w$]*)/g)]
+      .map(([, literal, name]) => (literal !== undefined
+        ? literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '<[^>]+>'))
+    const pattern = new RegExp(tokens.join('\\s+'))
+    assert.match(readme, pattern, `README lacks: ${call.replace(/\s+/g, ' ')}`)
   }
 })

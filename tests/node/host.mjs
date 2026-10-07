@@ -20,6 +20,9 @@
 //   $.store        an in-memory key-value store of JSON copies, at most 4 MiB of JSON text    [F12]
 //   $.env.get      reads this host's environment, not the test process's                     [F13]
 //   $.ui.log       collected in `logs`                                                        [F14]
+//   $.session      id() and cwd(): the session the host currently runs, which a test sets with
+//                  `host.session = { id, cwd }`; at prompt.submit, id() is the id the session
+//                  started with, including the new one after /clear                            [F20]
 //
 // TORCH_TEST_TIMEOUT_SCALE (default 1) multiplies every process timeout, for a machine too loaded
 // to run git within Torch's 5 s; a mutation run sets it so a slow git is not read as a kill.
@@ -31,6 +34,7 @@
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const READ_LIMIT = 4 * 1024 * 1024
 const OUTPUT_LIMIT = 4 * 1024 * 1024
@@ -108,8 +112,11 @@ function runReal(argv, init, env) {
   })
 }
 
+let loads = 0
+
 export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {}) {
   let currentEnv = env
+  const session = { id: undefined, cwd }
   const hooks = []
   const store = new Map()
   const logs = []
@@ -167,7 +174,8 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
       log: (text) => { logs.push(text) },
     },
     session: {
-      cwd: async () => cwd,
+      id: async () => session.id,
+      cwd: async () => session.cwd,
     },
   }
 
@@ -183,7 +191,8 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
   // `core`, which stands for Claude Code's own behaviour and the settings hooks beneath the
   // mods. A hook that fails is handed to its .catch handler, as the engine does: before it
   // called next, the handler's answer replaces it; after, an undefined answer keeps next's.
-  async function fire(event, e, core = async () => ({})) {
+  async function fire(event, e, core) {
+    core ??= async () => ({})
     const chain = hooks.filter((entry) => entry.event === event && matches(entry.filter, e))
     const dispatch = async (index, input) => {
       if (index === chain.length) return core(input)
@@ -209,9 +218,19 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
     return dispatch(0, deepFreeze(structuredClone(e)))
   }
 
+  // Each host loads its own instance of the module, as each Claude Code process does, so state the
+  // module keeps for its life starts empty in every test.
   async function load(modulePath) {
-    const module = await import(modulePath)
+    loads += 1
+    const module = await import(`${pathToFileURL(modulePath).href}?host=${loads}`)
     module.register(on, {})
+  }
+
+  // A new instance of the module in place of the current one, with the same store: what
+  // `/reload-plugins` does, and what a new Claude Code process resuming a session finds.
+  async function reload(modulePath) {
+    hooks.length = 0
+    await load(modulePath)
   }
 
   // Run `body` with the host's environment replaced, as one hook run in v1 got its own env.
@@ -225,5 +244,5 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
     }
   }
 
-  return { $, on, fire, load, withEnv, store, logs, intercept, get env() { return currentEnv } }
+  return { $, on, fire, load, reload, withEnv, store, logs, intercept, session, get env() { return currentEnv } }
 }
