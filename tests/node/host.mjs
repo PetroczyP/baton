@@ -207,9 +207,9 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
       try {
         return await hook($, input, next)
       } catch (error) {
-        // The handler runs once a call the hook made has settled, whichever way.
-        if (last !== undefined) await Promise.allSettled([last])
         const called = last !== undefined
+        // The handler runs once a call the hook made has settled, whichever way.
+        if (called) await Promise.allSettled([last])
         if (!onError) return called ? last : dispatch(index + 1, input)
         let replay = last
         const handlerNext = (passed) => {

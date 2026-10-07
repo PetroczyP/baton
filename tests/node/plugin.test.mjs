@@ -98,7 +98,7 @@ function functionBody(name, code = source) {
 }
 
 // Every return statement in a piece of code, wherever it stands on its line.
-const returnsIn = (code) => [...code.matchAll(/\breturn\b([^\n]*)/g)].map((m) => `return${m[1]}`.trim())
+const returnsIn = (code) => [...code.matchAll(/\breturn\b[^\n]*/g)].map((m) => m[0].trim())
 
 // What each hook returns (spec R17).
 const hookReturns = (code) => ({
@@ -113,8 +113,8 @@ const HOOK_RETURNS = {
 
 // Each use of next the directory could misread (spec R16, R17): every use must declare it as a
 // hook's or handler's own parameter, call it with the hook's event (or R17's added context), or
-// read next.error in a handler; and the module has exactly two .catch handlers, each the inline
-// log line followed by return next(e).
+// read next.error?.message; and the module has exactly two .catch handlers, each the inline log
+// line followed by return next(e).
 function nextProblems(code) {
   const text = code.replace(/\/\/.*$/gm, '')
   const problems = []
@@ -156,6 +156,15 @@ test('the shape checks reject the regressions they exist for', () => {
     'a handler passes on another event': swap(last, last.replace('next(e)', 'next({ ...e, source: e.source })')),
   }
   for (const [label, variant] of Object.entries(handlers)) assert.notDeepEqual(nextProblems(variant), [], label)
+  // With both handlers untouched, only the scan of each use of next can catch these.
+  const uses = {
+    'a hook hands next to a helper': swap('  await announce($, e)\n', '  await announce($, e, next)\n'),
+    'a hook reads next.called': swap('  const context = await firstMessageContext($, e)\n', '  const context = next.called ? null : await firstMessageContext($, e)\n'),
+  }
+  const pinned = ['not exactly two .catch handlers', 'a .catch handler is not the inline log line and return next(e)']
+  for (const [label, variant] of Object.entries(uses)) {
+    assert.ok(nextProblems(variant).some((problem) => !pinned.includes(problem)), label)
+  }
   const hooks = {
     'a hook answers on the line of a condition': swap('  await announce($, e)\n', "  await announce($, e)\n  if (e.source === 'clear') return {}\n"),
     'a hook passes on another event': swap('  await announce($, e)\n  return next(e)', '  await announce($, e)\n  return next({ ...e })'),
@@ -182,13 +191,14 @@ function processRunCalls() {
 test('the README and PRIVACY name every environment variable the mod reads', () => {
   const names = [...source.matchAll(/\$\.env\.get\('([^']+)'\)/g)].map((m) => m[1])
   assert.deepEqual(names, ['CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ATTENDED'])
+  assert.equal(source.split('$.env.get(').length - 1, names.length, 'every env read is spelled as a literal')
   for (const doc of ['README.md', 'PRIVACY.md']) {
     for (const name of names) assert.ok(read(doc).includes(`\`${name}\``), `${doc} lacks ${name}`)
   }
 })
 
 test('the README and PRIVACY name both spellings that leave the file to the load skill', () => {
-  assert.match(source, /const LOAD_SKILL = \/\^\\s\*\\\/\(\?:torch:\)\?load-handoff\(\\s\|\$\)\//)
+  assert.ok(source.includes(String.raw`const LOAD_SKILL = /^\s*\/(?:torch:)?load-handoff(\s|$)/`), 'LOAD_SKILL changed')
   for (const doc of ['README.md', 'PRIVACY.md']) assert.match(read(doc), /`\/torch:load-handoff` or `\/load-handoff`/, doc)
 })
 

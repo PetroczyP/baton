@@ -121,4 +121,3 @@ test('a .catch handler runs only once a next call the hook made has settled', as
   assert.deepEqual(await fired, { text: 'd' })
   assert.deepEqual(order, ['core starts', 'core settles', 'catch'])
 })
-
