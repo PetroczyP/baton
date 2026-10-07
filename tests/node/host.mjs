@@ -21,6 +21,9 @@
 //   $.env.get      reads this host's environment, not the test process's                     [F13]
 //   $.ui.log       collected in `logs`                                                        [F14]
 //
+// TORCH_TEST_TIMEOUT_SCALE (default 1) multiplies every process timeout, for a machine too loaded
+// to run git within Torch's 5 s; a mutation run sets it so a slow git is not read as a kill.
+//
 // Tests can intercept a call with `intercept.run(argv, real)`, `intercept.read(path, real)`,
 // which replace the real call for the arguments they choose, as the v1 tests replaced os.rename
 // or os.link. The real engine's event shapes and result merging are checked separately by the
@@ -32,6 +35,7 @@ import * as path from 'node:path'
 const READ_LIMIT = 4 * 1024 * 1024
 const OUTPUT_LIMIT = 4 * 1024 * 1024
 const STORE_LIMIT = 4 * 1024 * 1024
+const TIMEOUT_SCALE = Number(process.env.TORCH_TEST_TIMEOUT_SCALE ?? 1)
 
 function deepFreeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -78,7 +82,7 @@ function runReal(argv, init, env) {
       settled = true
       child.kill('SIGKILL')
       reject(new Error(`${argv[0]} was still running after ${init.timeoutMs} ms`))
-    }, init.timeoutMs ?? 30_000)
+    }, (init.timeoutMs ?? 30_000) * TIMEOUT_SCALE)
     child.stdout.on('data', (chunk) => { out.stdout.push(chunk) })
     child.stderr.on('data', (chunk) => { out.stderr.push(chunk) })
     child.on('error', (error) => {
