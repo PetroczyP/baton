@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  CONTEXT_LIMIT, archiveStamp, contractFields, humanAge, loadedTexts, localTime, parseStatus,
+  CONTEXT_LIMIT, announcedBanner, archiveStamp, contractFields, deliveredTexts, humanAge, localTime, parseStatus,
 } from '../../hooks/rules.mjs'
 
 const HEAD40 = 'a'.repeat(40)
@@ -78,12 +78,36 @@ test('local time names its zone; the archive stamp is UTC', () => {
 
 test('a handoff is inlined up to 9,800 UTF-16 units of context, and pointed to above', () => {
   assert.equal(CONTEXT_LIMIT, 9_800)
-  const facts = { handoff: '/p/handoff-before-clear.md', saved: 's', age: '1 min', drift: ['clean'], archiveTo: '/a.md', recorded: true }
-  const base = loadedTexts({ ...facts, text: '' }).context.length
-  const fits = loadedTexts({ ...facts, text: 'x'.repeat(9_800 - base) })
+  const facts = { outcome: 'archived', place: '/a.md', handoff: '/p/handoff-before-clear.md', saved: 's', age: '1 min', drift: ['clean'] }
+  const base = deliveredTexts({ ...facts, text: '' }).context.length
+  const fits = deliveredTexts({ ...facts, text: 'x'.repeat(9_800 - base) })
   assert.equal(fits.context.length, 9_800)
   assert.match(fits.context, /<handoff>/)
-  const over = loadedTexts({ ...facts, text: 'x'.repeat(9_801 - base) })
+  const over = deliveredTexts({ ...facts, text: 'x'.repeat(9_801 - base) })
   assert.doesNotMatch(over.context, /<handoff>/)
-  assert.match(over.banner, /chars, Claude reads it from the file/)
+  assert.match(over.context, /too long to include here\. Read it at \/a\.md before acting on it\.$/)
+  const announced = { handoff: facts.handoff, saved: 's', age: '1 min', drift: ['clean'], archiveTo: '/a.md', recorded: true }
+  assert.match(announcedBanner({ ...announced, text: 'x'.repeat(20_000) }), / · 20,000 chars, Claude reads it from the file\. /)
+  assert.doesNotMatch(announcedBanner({ ...announced, text: 'short' }), /chars/)
+})
+
+test('each archive outcome tells the user and Claude what happened, and delivers only the announced handoff', () => {
+  const facts = { handoff: '/p/handoff-before-clear.md', saved: 's', age: '1 min', drift: ['clean'], text: 'THE TEXT' }
+  const archived = deliveredTexts({ ...facts, outcome: 'archived', place: '/p/.claude/handoff-archive/a.md' })
+  assert.equal(archived.banner, 'Handoff archived to /p/.claude/handoff-archive/a.md')
+  assert.match(archived.context, /^This project's handoff file was loaded automatically with this message/)
+  assert.match(archived.context, /THE TEXT/)
+  const kept = deliveredTexts({ ...facts, outcome: 'kept', place: '/p/.handoff-claim-x.md' })
+  assert.match(kept.context, /It could not be archived and is now at \/p\/\.handoff-claim-x\.md\./)
+  assert.match(kept.context, /THE TEXT/)
+  for (const outcome of ['changed', 'kept-other', 'kept-unread']) {
+    const out = deliveredTexts({ ...facts, outcome, place: '/p/x.md' })
+    assert.ok(out.context.startsWith('No handoff was delivered with this message.'), outcome)
+    assert.doesNotMatch(out.context, /THE TEXT/, outcome)
+    assert.match(out.banner, /Claude didn't get it/, outcome)
+  }
+  const gone = deliveredTexts({ ...facts, outcome: 'gone', place: null })
+  assert.equal(gone.context, null)
+  assert.equal(gone.banner, "handoff-before-clear.md was gone before your first message, so Claude didn't get it.")
+  assert.throws(() => deliveredTexts({ ...facts, outcome: 'surprise' }), /unknown archive outcome/)
 })

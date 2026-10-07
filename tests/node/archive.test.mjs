@@ -1,5 +1,5 @@
 // A handoff saved by another session while this one archives must never be lost, and wherever
-// the archive stops, the file's location is known. Ported from v1's ArchiveRaceTests: where v1
+// the archive stops, the file's location is known, and only the announced handoff is delivered. Ported from v1's ArchiveRaceTests: where v1
 // replaced os.rename or os.link, these intercept the `mv` or `link` the mod runs.
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
@@ -180,8 +180,9 @@ test('a failed mv with the handoff still in place leaves it untouched', async (t
 })
 
 async function submitWithoutHardLinks(w, live, dest, claims) {
+  w.host.session.id = SESSION
   await w.host.$.store.set(`session:${SESSION}`, {
-    handoff: live, sha256: sha(LOADED), archiveTo: dest, at: Date.now(),
+    handoff: live, sha256: sha(LOADED), archiveTo: dest, savedTs: Date.now() / 1000, drift: ['not a git repo'], at: Date.now(),
   })
   const runs = w.host.intercept.run
   w.host.intercept.run = (argv, real) => noLinks(argv, () => (runs ? runs(argv, real) : real()))
@@ -195,7 +196,8 @@ test('without hard links the model is told where the handoff is', async (t) => {
   const { w, live, dest, claims } = await setup(t)
   fs.writeFileSync(live, LOADED)
   const { kept, context } = await submitWithoutHardLinks(w, live, dest, claims)
-  assert.ok(context.includes(`The auto-loaded handoff could not be archived and is now at ${kept}`), context)
+  assert.ok(context.includes(`It could not be archived and is now at ${kept}.`), context)
+  assert.match(context, /the one this session loaded/, 'the kept handoff is the announced one, so it is delivered')
 })
 
 test('without hard links an unreadable handoff is not identified', async (t) => {
@@ -207,9 +209,10 @@ test('without hard links an unreadable handoff is not identified', async (t) => 
   }
   const { kept, context } = await submitWithoutHardLinks(w, live, dest, claims)
   assert.deepEqual(fs.readFileSync(kept), LOADED)
-  assert.match(context, /it is unknown whether it is the one loaded/)
-  assert.doesNotMatch(context, /It is not the handoff loaded/)
-  assert.doesNotMatch(context, /The auto-loaded handoff/)
+  assert.match(context, /^No handoff was delivered with this message\./)
+  assert.match(context, /it is unknown whether it is the one announced/)
+  assert.doesNotMatch(context, /It is not the handoff announced/)
+  assert.doesNotMatch(context, /the one this session loaded/, 'an unread file is not delivered')
 })
 
 test('without hard links a later save is not passed off as the loaded one', async (t) => {
@@ -217,8 +220,9 @@ test('without hard links a later save is not passed off as the loaded one', asyn
   fs.writeFileSync(live, '# Handoff\nsaved by another session\n')
   const { kept, context } = await submitWithoutHardLinks(w, live, dest, claims)
   assert.equal(fs.readFileSync(kept, 'utf8'), '# Handoff\nsaved by another session\n')
-  assert.match(context, /It is not the handoff loaded at session start/)
-  assert.doesNotMatch(context, /The auto-loaded handoff/)
+  assert.match(context, /^No handoff was delivered with this message\./)
+  assert.match(context, /It is not the handoff announced at session start/)
+  assert.doesNotMatch(context, /saved by another session/, 'a later save is not delivered')
 })
 
 test('the loaded handoff is archived and nothing else remains', async (t) => {

@@ -20,6 +20,9 @@
 //   $.store        an in-memory key-value store of JSON copies, at most 4 MiB of JSON text    [F12]
 //   $.env.get      reads this host's environment, not the test process's                     [F13]
 //   $.ui.log       collected in `logs`                                                        [F14]
+//   $.session      id() and cwd(): the session the host currently runs, which a test sets with
+//                  `host.session = { id, cwd }`; at prompt.submit, id() is the id the session
+//                  started with, including the new one after /clear                            [F20]
 //
 // TORCH_TEST_TIMEOUT_SCALE (default 1) multiplies every process timeout, for a machine too loaded
 // to run git within Torch's 5 s; a mutation run sets it so a slow git is not read as a kill.
@@ -110,6 +113,7 @@ function runReal(argv, init, env) {
 
 export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {}) {
   let currentEnv = env
+  const session = { id: undefined, cwd }
   const hooks = []
   const store = new Map()
   const logs = []
@@ -167,7 +171,8 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
       log: (text) => { logs.push(text) },
     },
     session: {
-      cwd: async () => cwd,
+      id: async () => session.id,
+      cwd: async () => session.cwd,
     },
   }
 
@@ -183,7 +188,8 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
   // `core`, which stands for Claude Code's own behaviour and the settings hooks beneath the
   // mods. A hook that fails is handed to its .catch handler, as the engine does: before it
   // called next, the handler's answer replaces it; after, an undefined answer keeps next's.
-  async function fire(event, e, core = async () => ({})) {
+  async function fire(event, e, core) {
+    core ??= async () => ({})
     const chain = hooks.filter((entry) => entry.event === event && matches(entry.filter, e))
     const dispatch = async (index, input) => {
       if (index === chain.length) return core(input)
@@ -225,5 +231,5 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
     }
   }
 
-  return { $, on, fire, load, withEnv, store, logs, intercept, get env() { return currentEnv } }
+  return { $, on, fire, load, withEnv, store, logs, intercept, session, get env() { return currentEnv } }
 }
