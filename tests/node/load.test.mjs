@@ -393,6 +393,27 @@ test('records of sessions that never prompted expire', async (t) => {
   assert.deepEqual((await w.host.$.store.keys()).sort(), ['session:new-session', 'unrelated'])
 })
 
+test('a refused stale-record cleanup keeps the record, is logged, and the session starts', async (t) => {
+  for (const call of ['keys', 'get', 'delete']) {
+    await t.test(call, async (st) => {
+      const w = await fixture(st)
+      const sha = w.initRepo()
+      w.writeHandoff(handoffText({ head: sha }))
+      const old = { handoff: '/x', sha256: 'a', archiveTo: '/y', at: Date.now() - 31 * 86_400_000 }
+      await w.host.$.store.set('session:old-session', old)
+      const real = w.host.$.store[call]
+      w.host.$.store[call] = async () => { throw new Error(`store.${call} refused`) }
+      const settings = { additionalContext: ['other'] }
+      const out = await w.start({ core: async () => settings })
+      w.host.$.store[call] = real
+      assert.equal(out.result, settings)
+      assert.deepEqual(out.lines, [`could not announce the handoff: store.${call} refused`])
+      assert.deepEqual(await w.host.$.store.keys(), ['session:old-session'])
+      assert.deepEqual(await w.host.$.store.get('session:old-session'), old)
+    })
+  }
+})
+
 test('a handoff over 4 MiB is announced, not loaded', async (t) => {
   const w = await fixture(t)
   w.initRepo()
