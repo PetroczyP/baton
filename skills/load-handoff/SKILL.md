@@ -14,7 +14,7 @@ Resume the work described in `handoff-before-clear.md` without losing continuity
 1. Determine the project root: `git rev-parse --show-toplevel`, else the current working directory.
 2. Read `<project-root>/handoff-before-clear.md` from disk, even when this session's context already holds a handoff added at session start: another session may have saved a newer one since, and the file you resume must be the file you archive.
 3. If the file is missing, look in two places, newest file first:
-   - `<project-root>/.handoff-claim-*.md`: a handoff Torch could not finish archiving. It is not archived. Tell the user it was left at that path and when it was saved.
+   - `<project-root>/.handoff-claim-*.md`: a handoff Torch left at a temporary path when it couldn't finish archiving it or removing that temporary name, so a copy may also be in the archive. Tell the user it was left at that path and when it was saved.
    - the most recently modified `.md` file in `<project-root>/.claude/handoff-archive/`: a handoff that was archived although its work may never have happened, for example by a session closed right after its first message. Tell the user it comes from the archive and when it was saved.
 
    Continue below with the file you found. If neither exists, tell the user "No handoff file found — nothing to resume." and stop.
