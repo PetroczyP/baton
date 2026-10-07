@@ -18,16 +18,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - {os: ubuntu-latest, python: "3.9"}
-          - {os: ubuntu-latest, python: "3.14"}
-          - {os: macos-latest, python: "3.14"}
+          - {os: ubuntu-latest, node: "22"}
+          - {os: ubuntu-latest, node: "24"}
+          - {os: macos-latest, node: "24"}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97  # v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
-          python-version: ${{ matrix.python }}
-      - name: Hook tests
-        run: python tests/test_handoff_autoload.py
-      - name: Plugin tests
-        run: python tests/test_plugin.py
+          node-version: ${{ matrix.node }}
+      - name: Mod tests on the real file system (node:test)
+        run: node --test tests/node/*.test.mjs
+      # The version Torch is tested with; the README names it.
+      - name: Install Claude Code
+        run: npm install --global @anthropic-ai/claude-code@2.1.292
+      - name: Validate the plugin
+        run: claude plugin validate --strict .
+      - name: Mod tests in Claude Code's engine (claude plugin test)
+        run: claude plugin test
