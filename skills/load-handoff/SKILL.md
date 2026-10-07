@@ -13,7 +13,11 @@ Resume the work described in `handoff-before-clear.md` without losing continuity
 
 1. Determine the project root: `git rev-parse --show-toplevel`, else the current working directory.
 2. Read `<project-root>/handoff-before-clear.md` from disk, even when this session's context already holds a handoff added at session start: another session may have saved a newer one since, and the file you resume must be the file you archive.
-3. If the file is missing, look in `<project-root>/.claude/handoff-archive/` for the most recently modified `.md` file. This covers a handoff that was archived although its work never happened, for example by a session closed right after its first message. If there is one, tell the user it comes from the archive and when it was saved, then continue with it below. If the archive is empty or missing too: tell the user "No handoff file found — nothing to resume." and stop.
+3. If the file is missing, look in two places, newest file first:
+   - `<project-root>/.handoff-claim-*.md`: a handoff Torch left at a temporary path when it couldn't finish archiving it or removing that temporary name, so a copy may also be in the archive. Tell the user it was left at that path and when it was saved.
+   - the most recently modified `.md` file in `<project-root>/.claude/handoff-archive/`: a handoff that was archived although its work may never have happened, for example by a session closed right after its first message. Tell the user it comes from the archive and when it was saved.
+
+   Continue below with the file you found. If neither exists, tell the user "No handoff file found — nothing to resume." and stop.
 4. If the file is empty or has no line starting with `# Handoff`: tell the user the file looks malformed, show the first 20 lines, and ask whether to proceed anyway.
 
 ## Sanity-check the handoff matches the current project
@@ -52,7 +56,7 @@ Do NOT start executing work automatically. The user may want to adjust the plan,
 
 ## After the user confirms
 
-Once the user says go, ask one more short question: "Archive or keep the handoff file?" Skip it when the handoff came from the archive: it is already there.
+Once the user says go, ask one more short question: "Archive or keep the handoff file?" Skip it only when the handoff came from `.claude/handoff-archive/`: it is already there.
 
 - **Archive** → move the file to `<project-root>/.claude/handoff-archive/<ISO-timestamp>.md` (create the directory if needed). A later `/torch:load-handoff` then offers it only as an archived handoff, and only when there is no live one.
 - **Keep** → leave the file in place (useful if the resume is tentative and might be repeated).
