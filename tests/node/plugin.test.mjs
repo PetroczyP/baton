@@ -179,6 +179,19 @@ function processRunCalls() {
   return calls
 }
 
+test('the README and PRIVACY name every environment variable the mod reads', () => {
+  const names = [...source.matchAll(/\$\.env\.get\('([^']+)'\)/g)].map((m) => m[1])
+  assert.deepEqual(names, ['CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ATTENDED'])
+  for (const doc of ['README.md', 'PRIVACY.md']) {
+    for (const name of names) assert.ok(read(doc).includes(`\`${name}\``), `${doc} lacks ${name}`)
+  }
+})
+
+test('the README and PRIVACY name both spellings that leave the file to the load skill', () => {
+  assert.match(source, /const LOAD_SKILL = \/\^\\s\*\\\/\(\?:torch:\)\?load-handoff\(\\s\|\$\)\//)
+  for (const doc of ['README.md', 'PRIVACY.md']) assert.match(read(doc), /`\/torch:load-handoff` or `\/load-handoff`/, doc)
+})
+
 test('no program the mod runs gets standard input', () => {
   const calls = processRunCalls()
   assert.equal(calls.length, 6)
