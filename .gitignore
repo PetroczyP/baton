@@ -1,3 +1,5 @@
 __pycache__/
 .DS_Store
+# Written by Claude Code when it loads a mod with --plugin-dir
 .claude-plugin/types/
+tsconfig.json
