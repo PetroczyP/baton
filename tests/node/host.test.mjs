@@ -105,3 +105,20 @@ test('a .catch handler that answers undefined counts as the hook being absent', 
   assert.equal(runs, 1)
 })
 
+test('a .catch handler runs only once a next call the hook made has settled', async () => {
+  const host = createHost()
+  const order = []
+  let release
+  const core = (e) => {
+    order.push('core starts')
+    return new Promise((resolve) => { release = () => { order.push('core settles'); resolve({ text: e.text }) } })
+  }
+  host.on('eager', async ($, e, next) => { next(e); throw new Error('right after next') })
+    .catch(async ($, e, next) => { order.push('catch'); return next(e) })
+  const fired = host.fire('eager', { text: 'd' }, core)
+  await new Promise((resolve) => setImmediate(resolve))
+  release()
+  assert.deepEqual(await fired, { text: 'd' })
+  assert.deepEqual(order, ['core starts', 'core settles', 'catch'])
+})
+

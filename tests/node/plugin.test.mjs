@@ -91,36 +91,76 @@ test('no system files or oversized files', () => {
 // The directory reads the module without running it (spec R17, R18). These read it the same way.
 const source = read('hooks/torch.mjs')
 
-function functionBody(name) {
-  const start = source.indexOf(`export async function ${name}(`)
+function functionBody(name, code = source) {
+  const start = code.indexOf(`export async function ${name}(`)
   assert.ok(start >= 0, name)
-  return source.slice(start, source.indexOf('\n}\n', start))
+  return code.slice(start, code.indexOf('\n}\n', start))
+}
+
+// Every return statement in a piece of code, wherever it stands on its line.
+const returnsIn = (code) => [...code.matchAll(/\breturn\b([^\n]*)/g)].map((m) => `return${m[1]}`.trim())
+
+// What each hook returns (spec R17).
+const hookReturns = (code) => ({
+  announceHandoff: returnsIn(functionBody('announceHandoff', code)),
+  deliverHandoff: returnsIn(functionBody('deliverHandoff', code)),
+})
+
+const HOOK_RETURNS = {
+  announceHandoff: ['return next(e)'],
+  deliverHandoff: ['return next(e)', 'return next({ ...e, context: [...(e.context ?? []), context] })'],
+}
+
+// Each use of next the directory could misread (spec R16, R17): every use must declare it as a
+// hook's or handler's own parameter, call it with the hook's event (or R17's added context), or
+// read next.error in a handler; and the module has exactly two .catch handlers, each the inline
+// log line followed by return next(e).
+function nextProblems(code) {
+  const text = code.replace(/\/\/.*$/gm, '')
+  const problems = []
+  for (const match of text.matchAll(/\bnext\b/g)) {
+    const before = text.slice(Math.max(0, match.index - 60), match.index)
+    const after = text.slice(match.index + 4)
+    const declared = /(?:async \(|async function \w+\()\$, e, $/.test(before) && /^\)\s*(?:=>|\{)/.test(after)
+    const called = after.startsWith('(e)') || after.startsWith('({ ...e, context: [...(e.context ?? []), context] })')
+    const read = after.startsWith('.error?.message')
+    if (!(declared || called || read)) problems.push(text.slice(match.index - 30, match.index + 30).replace(/\s+/g, ' '))
+  }
+  const handlers = [...text.matchAll(/\.catch\(async \(\$, e, next\) => \{\n([\s\S]*?)\n {4}\}\)/g)].map((m) => m[1])
+  const handler = (verb) => `      $.ui.log(\`could not ${verb} the handoff: \${next.error?.message ?? 'unknown error'}\`)\n      return next(e)`
+  if ((text.match(/\.catch\(/g) ?? []).length !== 2) problems.push('not exactly two .catch handlers')
+  if (JSON.stringify(handlers) !== JSON.stringify([handler('announce'), handler('deliver')])) problems.push('a .catch handler is not the inline log line and return next(e)')
+  return problems
 }
 
 test('each hook ends in a shape the directory reads', () => {
-  const returns = (name) => functionBody(name).split('\n').map((line) => line.trim()).filter((line) => line.startsWith('return'))
-  assert.deepEqual(returns('announceHandoff'), ['return next(e)'])
-  assert.deepEqual(returns('deliverHandoff'), [
-    'return next(e)',
-    'return next({ ...e, context: [...(e.context ?? []), context] })',
-  ])
+  assert.deepEqual(hookReturns(source), HOOK_RETURNS)
   assert.doesNotMatch(source, /classic\.UserPromptSubmit/)
 })
 
-test('next is never handed to other code, and each .catch handler ends in return next(e)', () => {
-  const code = source.replace(/\/\/.*$/gm, '')
-  for (const match of code.matchAll(/\bnext\b/g)) {
-    const before = code.slice(match.index - 7, match.index)
-    const after = code.slice(match.index + 4, match.index + 12)
-    const allowed = before === '($, e, ' || after.startsWith('(e)') || after.startsWith('({ ...e,') || after.startsWith('.error')
-    assert.ok(allowed, `next used as: ${code.slice(match.index - 30, match.index + 30).replace(/\s+/g, ' ')}`)
+test('next is never handed to other code, and each .catch handler logs and ends in return next(e)', () => {
+  assert.deepEqual(nextProblems(source), [])
+})
+
+test('the shape checks reject the regressions they exist for', () => {
+  const swap = (from, to) => {
+    assert.equal(source.split(from).length, 2, from)
+    return source.replace(from, to)
   }
-  const handlers = [...code.matchAll(/\.catch\(async \(\$, e, next\) => \{([\s\S]*?)\n {4}\}\)/g)].map((m) => m[1])
-  assert.equal(handlers.length, 2, 'one inline handler per hook')
-  for (const body of handlers) {
-    const returns = body.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('return'))
-    assert.deepEqual(returns, ['return next(e)'])
+  const log = "$.ui.log(`could not announce the handoff: ${next.error?.message ?? 'unknown error'}`)"
+  const last = "      return next(e)\n    })\n  on('prompt.submit'"
+  const handlers = {
+    'a helper takes next': swap(log, 'logFailure($, e, next)'),
+    'a handler answers before passing on': swap(last, `      if (next.error.kind === 'timeout') return { drop: 'no' }\n${last}`),
+    'a handler returns conditionally': swap(last, last.replace('return next(e)', 'return next.called ? undefined : next(e)')),
+    'a handler passes on another event': swap(last, last.replace('next(e)', 'next({ ...e, source: e.source })')),
   }
+  for (const [label, variant] of Object.entries(handlers)) assert.notDeepEqual(nextProblems(variant), [], label)
+  const hooks = {
+    'a hook answers on the line of a condition': swap('  await announce($, e)\n', "  await announce($, e)\n  if (e.source === 'clear') return {}\n"),
+    'a hook passes on another event': swap('  await announce($, e)\n  return next(e)', '  await announce($, e)\n  return next({ ...e })'),
+  }
+  for (const [label, variant] of Object.entries(hooks)) assert.notDeepEqual(hookReturns(variant), HOOK_RETURNS, label)
 })
 
 // The arguments of each $.process.run call, up to its closing parenthesis.
