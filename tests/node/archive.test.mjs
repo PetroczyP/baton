@@ -116,6 +116,27 @@ test('a rejected link at a taken name moves on to the next name', async (t) => {
   assert.deepEqual(claims(), [])
 })
 
+test('archive names stop at -100: when every one is taken, the handoff is kept at the claim', { timeout: 30_000 }, async (t) => {
+  const { w, live, dest, claims } = await setup(t)
+  fs.writeFileSync(live, LOADED)
+  const tried = []
+  w.host.intercept.run = (argv, real) => {
+    if (argv[0] !== 'link') return real()
+    tried.push(path.basename(argv[2]))
+    return Promise.resolve(ran(1, 'link: File exists'))
+  }
+  const exists = w.host.$.fs.exists
+  w.host.$.fs.exists = async (file) => (path.dirname(file) === path.dirname(dest) || exists(file))
+  const { outcome, place } = await archive(w.host.$, live, sha(LOADED), dest)
+  w.host.$.fs.exists = exists
+  assert.equal(outcome, 'kept')
+  const [claim] = claims()
+  assert.equal(place, claim)
+  assert.deepEqual(fs.readFileSync(claim), LOADED)
+  assert.equal(tried.length, 100)
+  assert.deepEqual([tried[0], tried[1], tried.at(-1)], ['20260101T000000Z.md', '20260101T000000Z-2.md', '20260101T000000Z-100.md'])
+})
+
 test('an archive name that is a folder is skipped, never linked into', async (t) => {
   const { w, live, dest, claims } = await setup(t)
   fs.writeFileSync(live, LOADED)

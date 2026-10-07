@@ -81,3 +81,43 @@ test('git runs with the repository\'s hooks off', async (t) => {
   assert.equal(commit.exitCode, 0, commit.stderr)
   assert.ok(!fs.existsSync(path.join(dir, 'hook-ran')))
 })
+
+test('a .catch handler\'s next replays a call the hook made, and runs what is beneath once otherwise', async () => {
+  const host = createHost()
+  let runs = 0
+  const core = async (e) => { runs += 1; return { text: e.text, n: runs } }
+  host.on('late', async ($, e, next) => { await next(e); throw new Error('after next') })
+    .catch(async ($, e, next) => { await next(e); return next(e) })
+  host.on('early', async () => { throw new Error('before next') })
+    .catch(async ($, e, next) => { await next(e); return next(e) })
+  assert.deepEqual(await host.fire('late', { text: 'a' }, core), { text: 'a', n: 1 })
+  assert.equal(runs, 1, 'nothing beneath ran again')
+  assert.deepEqual(await host.fire('early', { text: 'b' }, core), { text: 'b', n: 2 })
+  assert.equal(runs, 2, 'what is beneath ran once')
+})
+
+test('a .catch handler that answers undefined counts as the hook being absent', async () => {
+  const host = createHost()
+  let runs = 0
+  const core = async (e) => { runs += 1; return { text: e.text } }
+  host.on('early', async () => { throw new Error('before next') }).catch(async () => undefined)
+  assert.deepEqual(await host.fire('early', { text: 'c' }, core), { text: 'c' })
+  assert.equal(runs, 1)
+})
+
+test('a .catch handler runs only once a next call the hook made has settled', async () => {
+  const host = createHost()
+  const order = []
+  let release
+  const core = (e) => {
+    order.push('core starts')
+    return new Promise((resolve) => { release = () => { order.push('core settles'); resolve({ text: e.text }) } })
+  }
+  host.on('eager', async ($, e, next) => { next(e); throw new Error('right after next') })
+    .catch(async ($, e, next) => { order.push('catch'); return next(e) })
+  const fired = host.fire('eager', { text: 'd' }, core)
+  await new Promise((resolve) => setImmediate(resolve))
+  release()
+  assert.deepEqual(await fired, { text: 'd' })
+  assert.deepEqual(order, ['core starts', 'core settles', 'catch'])
+})

@@ -22,7 +22,7 @@ function message(text: string, origin = 'composer', context?: string[]) {
 }
 
 // Stubs for every call Torch makes, over an in-memory project folder that is not a git repo.
-function project(on: any, files: Files, { denyStat = false } = {}) {
+function project(on: any, files: Files, { denyStat = false, denyStoreGet = false } = {}) {
   const store = new Map<string, unknown>()
   const logs: string[] = []
   const runs: string[][] = []
@@ -35,7 +35,7 @@ function project(on: any, files: Files, { denyStat = false } = {}) {
     return { value: undefined }
   })
   on('store.keys', () => ({ value: [...store.keys()] }))
-  on('store.get', ($: any, e: any) => ({ value: store.get(e.key) }))
+  on('store.get', ($: any, e: any) => (denyStoreGet ? { deny: 'a policy mod refused it' } : { value: store.get(e.key) }))
   on('store.set', ($: any, e: any) => {
     store.set(e.key, e.value)
     return { value: undefined }
@@ -157,4 +157,24 @@ test('a refused call is logged and the session starts with the other hooks\' res
   expect(result).toEqual(settings)
   expect(world.logs.length).toBe(1)
   expect(world.logs[0]).toMatch(/^could not announce the handoff: .*a policy mod refused it/)
+})
+
+test('a refused call while delivering is logged and the message goes on unchanged, once', async ($, on) => {
+  const files: Files = new Map([[HANDOFF, handoff('Not this time.')]])
+  const world = project(on, files, { denyStoreGet: true })
+  on('classic.SessionStart', () => ({}))
+  let carried: string[] | undefined
+  let calls = 0
+  on('prompt.submit', ($: any, e: any) => {
+    calls += 1
+    carried = e.context
+    return { text: e.text, context: e.context, origin: e.origin }
+  })
+  await $.classic.SessionStart(startEvent('startup'))
+  const out = await $.prompt.submit(message('carry on', 'composer', ['from a prompt hook']))
+  expect(out.text).toBe('carry on')
+  expect(carried).toEqual(['from a prompt hook'])
+  expect(calls).toBe(1)
+  expect(world.logs.at(-1)).toMatch(/^could not deliver the handoff: .*a policy mod refused it/)
+  expect(files.has(HANDOFF)).toBe(true)
 })

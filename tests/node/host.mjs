@@ -189,30 +189,37 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
 
   // Fire an event through every hook registered for it, in registration order, ending in
   // `core`, which stands for Claude Code's own behaviour and the settings hooks beneath the
-  // mods. A hook that fails is handed to its .catch handler, as the engine does: before it
-  // called next, the handler's answer replaces it; after, an undefined answer keeps next's.
+  // mods. A hook that fails is handed to its .catch handler, as the engine does [F23]. There
+  // `next` is replay-safe: after the hook's own call it settles as that call did, with nothing
+  // beneath running again; before, it runs the hooks beneath once and a later call replays that.
+  // The handler's answer is the hook's result, and undefined counts as the hook being absent.
   async function fire(event, e, core) {
     core ??= async () => ({})
     const chain = hooks.filter((entry) => entry.event === event && matches(entry.filter, e))
     const dispatch = async (index, input) => {
       if (index === chain.length) return core(input)
       const { hook, onError } = chain[index]
-      let called = false
-      let nextResult
-      const next = async (passed) => {
-        called = true
-        nextResult = await dispatch(index + 1, passed)
-        return nextResult
+      let last
+      const next = (passed) => {
+        last = dispatch(index + 1, passed)
+        return last
       }
       try {
         return await hook($, input, next)
       } catch (error) {
-        if (!onError) return called ? nextResult : dispatch(index + 1, input)
-        const handlerNext = async (passed) => dispatch(index + 1, passed)
+        const called = last !== undefined
+        // The handler runs once a call the hook made has settled, whichever way.
+        if (called) await Promise.allSettled([last])
+        if (!onError) return called ? last : dispatch(index + 1, input)
+        let replay = last
+        const handlerNext = (passed) => {
+          replay ??= dispatch(index + 1, passed)
+          return replay
+        }
         handlerNext.error = { kind: 'throw', message: error instanceof Error ? error.message : String(error) }
         handlerNext.called = called
         const answer = await onError($, input, handlerNext)
-        return answer === undefined && called ? nextResult : answer
+        return answer === undefined ? handlerNext(input) : answer
       }
     }
     return dispatch(0, deepFreeze(structuredClone(e)))

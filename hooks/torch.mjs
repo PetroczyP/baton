@@ -8,6 +8,7 @@
 //   prompt.submit                          on the session's first message from the user,
 //                                          archives the handoff and attaches it to that message
 //                                          as context, unless the message is /torch:load-handoff
+//                                          or /load-handoff
 //
 // Every function that is handed `$` is declared in this file, as `claude plugin validate`
 // requires; rules.mjs holds the rules that need no file or process access. Torch never answers
@@ -22,6 +23,7 @@ import {
 
 const GIT_TIMEOUT_MS = 5_000
 const CLAIM_PREFIX = '.handoff-claim-'
+const ARCHIVE_NAMES = 100     // dest, dest-2, ..., dest-100
 const RECORD_PREFIX = 'session:'
 const LOAD_SKILL = /^\s*\/(?:torch:)?load-handoff(\s|$)/
 const USER_ORIGINS = new Set(['composer', 'bridge'])
@@ -37,18 +39,20 @@ const answered = new Set()
 // set above, after a reload or in a session resumed in a new process, is never acted on.
 const RUN = randomHex(16)
 
+// A failed hook is logged, and its .catch handler passes the event on. In a handler `next` is
+// replay-safe: after the hook's own call it gives that call's result and nothing runs again;
+// before, it runs the hooks beneath once.
 export function register(on) {
   on('classic.SessionStart', { source: ['startup', 'clear'] }, announceHandoff)
-    .catch(($, e, next) => reportFailure($, 'announce', e, next))
+    .catch(async ($, e, next) => {
+      $.ui.log(`could not announce the handoff: ${next.error?.message ?? 'unknown error'}`)
+      return next(e)
+    })
   on('prompt.submit', deliverHandoff)
-    .catch(($, e, next) => reportFailure($, 'deliver', e, next))
-}
-
-// A failed hook is logged, and the event continues: with the result `next` already gave, or
-// by calling it now.
-export async function reportFailure($, verb, e, next) {
-  $.ui.log(`could not ${verb} the handoff: ${next.error?.message ?? 'unknown error'}`)
-  return next.called ? undefined : next(e)
+    .catch(async ($, e, next) => {
+      $.ui.log(`could not deliver the handoff: ${next.error?.message ?? 'unknown error'}`)
+      return next(e)
+    })
 }
 
 export async function announceHandoff($, e, next) {
@@ -116,7 +120,7 @@ async function announce($, e) {
 
   const drift = driftParts(status, isRepo, fields)
   // The archive name by the save time; if it is taken when the first message comes, archive() moves
-  // on to -2, -3 and so on.
+  // on to -2, -3 and so on, up to -100.
   const archiveTo = joinPath(joinPath(root, ARCHIVE_DIR), `${archiveStamp(savedTs)}.md`)
   const recorded = await recordSession($, usableSessionId(e.session_id), {
     handoff, sha256: await sha256Hex(bytes), archiveTo, savedTs, drift, at: Date.now(), run: RUN,
@@ -125,8 +129,8 @@ async function announce($, e) {
 }
 
 // The context for this message, or null when it passes on unchanged: it is not from the user, its
-// session has no record, it is not the session's first, it hands the file to /torch:load-handoff,
-// or another run of Torch wrote the record.
+// session has no record, it is not the session's first, it hands the file to /torch:load-handoff
+// or /load-handoff, or another run of Torch wrote the record.
 // On the first message the handoff is archived first, so the context says where it now is.
 async function firstMessageContext($, e) {
   if (!USER_ORIGINS.has(e.origin?.kind)) return null
@@ -300,16 +304,18 @@ async function claimFailure($, handoff, claim) {
   throw new Error(`mv could not claim ${handoff}: ${reason}`)
 }
 
-// Hard-link source at dest, or at dest-2, dest-3, ... while a name is taken; null when no link
-// can be made at all.
+// Hard-link source at dest, or at dest-2, dest-3, ... up to dest-100 while a name is taken; null
+// when no link can be made, or every one of those names is taken. The bound matters because a
+// hook's time limit doesn't count the time its mods API calls take.
 async function linkFree($, source, dest) {
   const stem = dest.slice(0, -'.md'.length)
-  for (let n = 1; ; n += 1) {
+  for (let n = 1; n <= ARCHIVE_NAMES; n += 1) {
     const target = n === 1 ? dest : `${stem}-${n}.md`
     const linked = await tryLink($, source, target)
     if (linked === 'linked') return target
     if (linked === 'failed') return null
   }
+  return null
 }
 
 // 'linked', 'taken' when something is already at target, or 'failed', which includes not being
