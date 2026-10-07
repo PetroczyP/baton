@@ -20,7 +20,6 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -59,9 +58,10 @@ class HookCase(unittest.TestCase):
         self.data = base / "plugin data"     # CLAUDE_PLUGIN_DATA; the space tests quoting
         self.repo = base / "repo"
         self.repo.mkdir()
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
-        self.env.update(GIT_ENV, HOME=str(self.home), CLAUDE_PLUGIN_DATA=str(self.data),
-                        CLAUDE_CODE_ENTRYPOINT="cli", CLAUDE_CODE_SESSION_ATTENDED="1")
+        # A hermetic environment: only PATH comes from the caller, to find git and sh.
+        self.env = dict(GIT_ENV, PATH=os.environ.get("PATH", "/usr/bin:/bin"), HOME=str(self.home),
+                        CLAUDE_PLUGIN_DATA=str(self.data), CLAUDE_CODE_ENTRYPOINT="cli",
+                        CLAUDE_CODE_SESSION_ATTENDED="1")
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -566,12 +566,17 @@ class ArchiveRaceTests(HookCase):
             raise OSError(errno.EPERM, "hard links not supported")
 
         self.hook.os.link = no_links
+        previous = os.environ.get("CLAUDE_PLUGIN_DATA")
+        os.environ["CLAUDE_PLUGIN_DATA"] = str(self.data)
         try:
-            with mock.patch.dict(os.environ, {"CLAUDE_PLUGIN_DATA": str(self.data)}), \
-                    contextlib.redirect_stdout(out):
+            with contextlib.redirect_stdout(out):
                 self.hook.prompt_submit({"session_id": SESSION, "prompt": "go"})
         finally:
             self.hook.os.link = real_link
+            if previous is None:
+                os.environ.pop("CLAUDE_PLUGIN_DATA", None)
+            else:
+                os.environ["CLAUDE_PLUGIN_DATA"] = previous
         [kept] = list(self.dest.parent.iterdir())
         result = json.loads(out.getvalue())
         self.assertIn(str(kept), result["systemMessage"])

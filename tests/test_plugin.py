@@ -17,6 +17,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 SESSION = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
@@ -45,9 +46,9 @@ class PluginCase(unittest.TestCase):
         self.home.mkdir()
         self.repo = base / "my project"
         self.repo.mkdir()
-        self.env = {k: v for k, v in os.environ.items() if not k.startswith("CLAUDE")}
-        self.env.update(HOME=str(self.home), CLAUDE_PLUGIN_ROOT=str(self.root),
-                        CLAUDE_PLUGIN_DATA=str(self.data),
+        # A hermetic environment: only PATH comes from the caller, to find git, sh and python3.
+        self.env = dict(PATH=os.environ.get("PATH", "/usr/bin:/bin"), HOME=str(self.home),
+                        CLAUDE_PLUGIN_ROOT=str(self.root), CLAUDE_PLUGIN_DATA=str(self.data),
                         CLAUDE_CODE_ENTRYPOINT="cli", CLAUDE_CODE_SESSION_ATTENDED="1",
                         GIT_CONFIG_NOSYSTEM="1")
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.repo, env=self.env, check=True)
@@ -147,7 +148,8 @@ class DirectoryRequirementTests(unittest.TestCase):
         self.assertTrue(manifest["author"]["name"])
         self.assertTrue((ROOT / manifest["icon"]).is_file())
         for key in ("homepage", "documentationUrl", "supportUrl", "privacyPolicyUrl"):
-            self.assertTrue(manifest[key].startswith("https://"), key)
+            address = urlsplit(manifest[key])
+            self.assertEqual((address.scheme, bool(address.netloc)), ("https", True), key)
 
     def test_license_and_readme(self):
         self.assertTrue((ROOT / "LICENSE").is_file())
