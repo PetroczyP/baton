@@ -102,6 +102,20 @@ test('a link that cannot run keeps the claim, as no hard links would', async (t)
   assert.deepEqual(claims(), [place])
 })
 
+test('a rejected link at a taken name moves on to the next name', async (t) => {
+  const { w, live, dest, claims } = await setup(t)
+  fs.writeFileSync(live, LOADED)
+  fs.mkdirSync(path.dirname(dest), { recursive: true })
+  fs.writeFileSync(dest, 'an older archive')
+  w.host.intercept.run = (argv, real) => (argv[0] === 'link' && argv[2] === dest
+    ? Promise.reject(new Error('link was interrupted')) : real())
+  const { outcome, place } = await archive(w.host.$, live, sha(LOADED), dest)
+  assert.equal(outcome, 'archived')
+  assert.equal(path.basename(place), '20260101T000000Z-2.md')
+  assert.equal(fs.readFileSync(dest, 'utf8'), 'an older archive')
+  assert.deepEqual(claims(), [])
+})
+
 test('an archive name that is a folder is skipped, never linked into', async (t) => {
   const { w, live, dest, claims } = await setup(t)
   fs.writeFileSync(live, LOADED)
