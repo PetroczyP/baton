@@ -48,13 +48,13 @@ They are preceded by:
 - the handoff's path, its save time, and where it is now: in the archive, or where it was kept when the move couldn't finish
 - the git drift summary from session start
 
-A handoff too large to include is replaced by its path and an instruction to read it before acting on it. If the file changed between session start and your first message, Claude gets no handoff, and both you and Claude are told what happened and where the file is. If it disappeared, you are told, and Claude gets nothing.
+A handoff too large to include is replaced by its path and an instruction to read it before acting on it. If the file changed between session start and your first message, Claude gets no handoff, and both you and Claude are told what happened and where the file is. If it disappeared, you are told, and Claude gets nothing; the same goes when Torch restarted after announcing it (below).
 
 ## How it decides
 
 1. **Only the newest handoff is loaded.** That's `handoff-before-clear.md` at the project root, the git top level or else the folder you started in. Each save overwrites it. The archive is never read automatically, and neither is another project's handoff.
 2. **Only new sessions and `/clear` announce it, and only your first message delivers it.** Resumed and compacted sessions already have their context.
-3. **Only interactive Claude Code on your machine loads it.** A headless run (`claude -p`, the Agent SDK), Cowork, a cloud or remote session, and other hosts never load it. Only the session that announced a handoff delivers and archives it, and only a message you send counts: a background task's notification or another session's message leaves the handoff for yours. Torch is tested in the terminal; the IDE extensions and the desktop app's Code tab run the same Claude Code, but Torch isn't tested there.
+3. **Only interactive Claude Code on your machine loads it.** A headless run (`claude -p`, the Agent SDK), Cowork, a cloud or remote session, and other hosts never load it. Only the session that announced a handoff delivers and archives it, and only a message you send counts: a background task's notification or another session's message leaves the handoff for yours. If Torch restarts before your first message, after `/reload-plugins` or in a session resumed in a new Claude Code process, that message neither gives Claude the handoff nor moves it, says so, and leaves the file for `/torch:load-handoff`. Torch is tested in the terminal; the IDE extensions and the desktop app's Code tab run the same Claude Code, but Torch isn't tested there.
 4. **Your first message archives it.** It moves to `.claude/handoff-archive/<saved-time>.md` as the message goes to Claude. It never overwrites an existing archive, and never deletes a handoff that another session saved in the meantime. If it can't finish the move, Torch tells you and Claude where the file is: in rare cases, a hidden `.handoff-claim-….md` file at the project root. If another hook refuses that first message, Claude doesn't get the handoff and Torch doesn't retry; `/torch:load-handoff` brings it back from the archive. Commands like `/clear`, `/exit`, `/model` and `/effort` don't count as messages, so a session you close without typing leaves the handoff for the next one.
 5. **A first message of `/torch:load-handoff` leaves the file to that skill.**
 6. **Old handoffs are announced, not loaded.** If a handoff was saved more than 14 days ago, the banner says it's there and it stays put. The save time comes from the handoff's `saved_at`, or the file's modification time without it.
@@ -98,8 +98,8 @@ Torch stores no message text and logs none. The record it keeps for a session (b
 
 **What it writes.**
 
-- At session start, a small record for the session in Claude Code's storage for Torch (`~/.claude/plugins/store/torch_….json`): the handoff's path, its SHA-256 hash, the planned archive path, its save time, the git drift summary and the time of the record, under the session id. Torch deletes records there that are more than 30 days old.
-- With your first message, it deletes the session's record and moves the handoff into `<project>/.claude/handoff-archive/` with the commands above.
+- At session start, a small record for the session in Claude Code's storage for Torch (`~/.claude/plugins/store/torch_….json`): the handoff's path, its SHA-256 hash, the planned archive path, its save time, the git drift summary, the time of the record and a random id for the run of Torch that wrote it, under the session id. Each session start where Torch runs also tries to delete any record there that is more than 30 days old; if the store refuses, a record can stay longer.
+- With the first message you send, it deletes the session's record and moves the handoff into `<project>/.claude/handoff-archive/` with the commands above. Only the run of Torch that wrote a record acts on it; another run only deletes it.
 
 **The skills** run only when you or Claude invoke them:
 
