@@ -11,7 +11,7 @@
   "repository": "https://github.com/PetroczyP/torch",
   "license": "MIT",
   "keywords": ["handoff", "session", "resume", "context", "continuity"],
-  "icon": "./icon.png",
+  "icon": "./icon.svg",
   "documentationUrl": "https://github.com/PetroczyP/torch#readme",
   "supportUrl": "https://github.com/PetroczyP/torch/issues",
   "privacyPolicyUrl": "https://github.com/PetroczyP/torch/blob/main/PRIVACY.md"
