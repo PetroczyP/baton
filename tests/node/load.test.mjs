@@ -435,3 +435,76 @@ test('a leading byte-order mark is dropped before the contract and title are rea
   assert.match(out.context, /Saved with a BOM\./)
   assert.ok(out.banner.includes('branch main ✓ · no new commits'), out.banner)
 })
+
+test('the nearest repository is the project root', async (t) => {
+  const w = await fixture(t)
+  w.initRepo()
+  const inner = path.join(w.repo, 'vendor', 'inner')
+  fs.mkdirSync(inner, { recursive: true })
+  w.git(['init', '-q', '-b', 'inner-main'], inner)
+  w.git(['commit', '-q', '--allow-empty', '-m', 'i'], inner)
+  w.writeHandoff(handoffText({ branch: 'inner-main', body: 'The inner one.' }), { root: inner })
+  w.writeHandoff(handoffText({ body: 'The outer one.' }))
+  const out = await w.start({ cwd: path.join(inner) })
+  assert.match(out.context, /The inner one\./)
+  assert.ok(out.banner.includes('branch inner-main ✓'), out.banner)
+})
+
+test('a handoff path that is a folder is silently ignored', async (t) => {
+  const w = await fixture(t)
+  w.initRepo()
+  fs.mkdirSync(w.handoff)
+  const out = await w.start()
+  assert.deepEqual([out.banner, out.context], ['', ''])
+})
+
+test('a handoff just past 14 days is announced, not loaded', async (t) => {
+  const w = await fixture(t)
+  const sha = w.initRepo()
+  w.writeHandoff(handoffText({ head: sha, body: 'Just too old.', savedAt: iso(14.01) }))
+  const out = await w.start()
+  assert.match(out.banner, /older than 14 days/)
+  assert.equal(out.context, '')
+})
+
+test('when the store refuses the record, the handoff loads and stays in place', async (t) => {
+  const w = await fixture(t)
+  const sha = w.initRepo()
+  w.writeHandoff(handoffText({ head: sha, body: 'Unrecorded.' }))
+  w.host.$.store.set = async () => { throw new Error('the store is full') }
+  const out = await w.start()
+  assert.match(out.context, /Unrecorded\./)
+  assert.match(out.context, /It stays in place: this session could not be recorded for archiving\./)
+  assert.match(out.banner, /It will not be archived automatically\./)
+})
+
+test('an archive name taken before the session started is skipped in the announcement', async (t) => {
+  const w = await fixture(t)
+  const sha = w.initRepo()
+  const saved = iso()
+  w.writeHandoff(handoffText({ head: sha, savedAt: saved }))
+  const stamp = saved.replaceAll('-', '').replaceAll(':', '')
+  fs.mkdirSync(w.archiveDir, { recursive: true })
+  fs.writeFileSync(path.join(w.archiveDir, `${stamp}.md`), 'taken')
+  const out = await w.start()
+  assert.ok(out.context.includes(`it moves to ${path.join(w.archiveDir, `${stamp}-2.md`)},`), out.context)
+})
+
+test('records expire after 30 days, not before', async (t) => {
+  const w = await fixture(t)
+  const day = 86_400_000
+  await w.host.$.store.set('session:just-in', { at: Date.now() - 30 * day + 60_000 })
+  await w.host.$.store.set('session:just-out', { at: Date.now() - 30 * day - 60_000 })
+  await w.start()
+  assert.deepEqual(await w.host.$.store.keys(), ['session:just-in'])
+})
+
+test('a handoff of exactly 4 MiB is read and pointed to', async (t) => {
+  const w = await fixture(t)
+  w.initRepo()
+  const head = '# Handoff\n\n'
+  w.writeHandoff(head + 'z'.repeat(4 * 1024 * 1024 - head.length))
+  const out = await w.start()
+  assert.match(out.context, /too long to include here/)
+  assert.match(out.banner, /Claude reads it from the file/)
+})

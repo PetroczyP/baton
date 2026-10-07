@@ -69,8 +69,10 @@ test('each skill has parseable front matter', () => {
     const lines = read(path.join('skills', skill, 'SKILL.md')).split('\n')
     assert.equal(lines[0], '---', skill)
     const end = lines.indexOf('---', 1)
+    assert.ok(end > 1, `${skill}: the front matter has no closing ---`)
     const fields = Object.fromEntries(lines.slice(1, end).map((line) => {
       const at = line.indexOf(': ')
+      assert.ok(at > 0, `${skill}: not a "key: value" line: ${line}`)
       return [line.slice(0, at), line.slice(at + 2)]
     }))
     assert.equal(fields.name, skill)

@@ -157,3 +157,126 @@ test('a failure while archiving is logged and the prompt goes through', async (t
   assert.equal(w.host.logs.at(-1), `could not archive the handoff: mv could not claim ${w.handoff}: mv: command not found`)
   assert.ok(fs.existsSync(w.handoff))
 })
+
+test('a command that only starts like load-handoff is a first message like any other', async (t) => {
+  for (const command of ['/load-handoff-extra', '/torch:load-handoffs', '/torch:load-handoff-now']) {
+    await t.test(command, async (st) => {
+      const { w } = await loaded(st)
+      await w.prompt(command)
+      assert.ok(!fs.existsSync(w.handoff))
+      assert.equal(w.archived().length, 1)
+    })
+  }
+})
+
+test('a successful load and archive add context and nothing else', async (t) => {
+  const { w } = await loaded(t)
+  const first = await w.prompt('go')
+  assert.deepEqual(Object.keys(first.result), ['additionalContext'])
+  const start = await w.start({ session: '22222222-0000-0000-0000-000000000000' })
+  assert.deepEqual(Object.keys(start.result), [])
+})
+
+test("one session's prompt never touches another session's record or handoff", async (t) => {
+  const { w } = await loaded(t)
+  const other = '33333333-0000-0000-0000-000000000000'
+  const out = await w.prompt('go', { session: other })
+  assert.deepEqual([out.banner, out.context], ['', ''])
+  assert.ok(fs.existsSync(w.handoff))
+  assert.deepEqual(await w.host.$.store.keys(), [`session:${SESSION}`])
+})
+
+test('a blocked first prompt with an empty reason still leaves the handoff', async (t) => {
+  const { w } = await loaded(t)
+  const blocked = await w.host.fire('classic.UserPromptSubmit', {
+    session_id: SESSION, cwd: w.repo, hook_event_name: 'UserPromptSubmit', prompt: 'go',
+  }, async () => ({ block: '' }))
+  assert.deepEqual(blocked, { block: '' })
+  assert.ok(fs.existsSync(w.handoff))
+  assert.deepEqual(await w.host.$.store.keys(), [`session:${SESSION}`])
+})
+
+test('a prompt from a folder that is not a POSIX path touches nothing', async (t) => {
+  const { w } = await loaded(t)
+  const runs = []
+  w.host.intercept.run = (argv, real) => { runs.push(argv[0]); return real() }
+  const out = await w.fire('classic.UserPromptSubmit', {
+    session_id: SESSION, cwd: 'C:\\work', hook_event_name: 'UserPromptSubmit', prompt: 'go',
+  })
+  assert.deepEqual([out.lines, out.context, runs], [[], '', []])
+  assert.deepEqual(await w.host.$.store.keys(), [`session:${SESSION}`])
+  assert.ok(fs.existsSync(w.handoff))
+})
+
+test('after a failed archive the session tries no more, and the prompt runs once', async (t) => {
+  const { w } = await loaded(t)
+  w.host.intercept.run = (argv, real) => (argv[0] === 'mkdir' ? Promise.reject(new Error('mkdir: denied')) : real())
+  let downstream = 0
+  const fire = () => w.host.fire('classic.UserPromptSubmit', {
+    session_id: SESSION, cwd: w.repo, hook_event_name: 'UserPromptSubmit', prompt: 'go',
+  }, async () => { downstream += 1; return {} })
+  await fire()
+  assert.equal(downstream, 1)
+  assert.equal(w.host.logs.at(-1), 'could not archive the handoff: mkdir: denied')
+  const logged = w.host.logs.length
+  await fire()
+  assert.equal(downstream, 2)
+  assert.equal(w.host.logs.length, logged, 'the second prompt logs nothing')
+  assert.ok(fs.existsSync(w.handoff))
+})
+
+test('when it cannot be told whether a link was made, the claim is kept and named', async (t) => {
+  const { w } = await loaded(t)
+  const original = fs.readFileSync(w.handoff)
+  w.host.intercept.run = (argv, real) => (argv[0] === 'link'
+    ? Promise.resolve({ exitCode: 1, stdout: '', stderr: 'link: failed', isStdoutTruncated: false, isStderrTruncated: false })
+    : real())
+  const exists = w.host.$.fs.exists
+  w.host.$.fs.exists = async (file) => {
+    if (file.includes('handoff-archive')) throw new Error('a policy refused it')
+    return exists(file)
+  }
+  const out = await w.prompt('go')
+  const [claim] = fs.readdirSync(w.repo).filter((name) => name.startsWith('.handoff-claim-'))
+  const kept = path.join(w.repo, claim)
+  assert.deepEqual(fs.readFileSync(kept), original)
+  assert.ok(out.banner.includes(kept), out.banner)
+  assert.ok(out.context.includes(kept), out.context)
+  assert.deepEqual(await w.host.$.store.keys(), [])
+})
+
+test('a temporary name that could not be removed is reported to the user and to Claude', async (t) => {
+  const cases = {
+    'rm fails, the name stays': { run: () => ({ exitCode: 1 }), leftover: true },
+    'rm reports failure after removing it': { run: async (real) => ({ ...(await real()), exitCode: 1 }), leftover: false },
+    'the rm call fails after removing it': { run: async (real) => { await real(); throw new Error('rm: lost') }, leftover: false },
+    'rm fails and the name cannot be checked': { run: () => ({ exitCode: 1 }), leftover: true, blindExists: true },
+  }
+  for (const [label, c] of Object.entries(cases)) {
+    await t.test(label, async (st) => {
+      const { w } = await loaded(st)
+      w.host.intercept.run = async (argv, real) => (argv[0] === 'rm'
+        ? { stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false, ...(await c.run(real)) }
+        : real())
+      if (c.blindExists) {
+        const exists = w.host.$.fs.exists
+        w.host.$.fs.exists = async (file) => {
+          if (path.basename(file).startsWith('.handoff-claim-')) throw new Error('a policy refused it')
+          return exists(file)
+        }
+      }
+      const out = await w.prompt('go')
+      const [archived] = w.archived()
+      assert.ok(out.banner.startsWith(`Handoff archived to ${archived}`), out.banner)
+      const claims = fs.readdirSync(w.repo).filter((name) => name.startsWith('.handoff-claim-'))
+      if (c.leftover) {
+        const leftover = path.join(w.repo, claims[0])
+        assert.ok(out.banner.includes(`${leftover}, which may remain`), out.banner)
+        assert.ok(out.context.includes(`${leftover}, which may remain`), out.context)
+      } else {
+        assert.deepEqual(claims, [])
+        assert.deepEqual(out.lines, [`Handoff archived to ${archived}`])
+      }
+    })
+  }
+})

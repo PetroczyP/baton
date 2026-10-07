@@ -129,6 +129,19 @@ test('a blocked first prompt keeps the block and leaves the handoff for the next
   expect(files.has(HANDOFF)).toBe(false)
 })
 
+test('a block with an empty reason is still a block', async ($, on) => {
+  const files: Files = new Map([[HANDOFF, handoff('Wait for me too.')]])
+  const world = project(on, files)
+  on('classic.SessionStart', () => ({}))
+  on('classic.UserPromptSubmit', () => ({ block: '' }))
+  await $.classic.SessionStart(startEvent('startup'))
+  const blocked = await $.classic.UserPromptSubmit(promptEvent('go'))
+  expect(blocked.block).toBe('')
+  expect(files.has(HANDOFF)).toBe(true)
+  expect(world.runs).toEqual([])
+  expect([...world.store.keys()]).toEqual([`session:${SESSION}`])
+})
+
 test('a refused call is logged and the session starts with the other hooks\' result', async ($, on) => {
   const files: Files = new Map([[HANDOFF, handoff('Unreachable.')]])
   const world = project(on, files, { denyStat: true })

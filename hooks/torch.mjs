@@ -46,11 +46,12 @@ export async function loadHandoff($, e, next) {
 export async function archiveOnFirstPrompt($, e, next) {
   const result = await next(e)
   const sessionId = usableSessionId(e.session_id)
-  if (sessionId === null) return result
+  // A session on an unsupported platform never loaded a handoff, so it has nothing to archive.
+  if (sessionId === null || (typeof e.cwd === 'string' && !e.cwd.startsWith('/'))) return result
   const key = RECORD_PREFIX + sessionId
   const record = await $.store.get(key)
   // A prompt another hook blocked never reached Claude: the record waits for the next one.
-  if (record === undefined || result?.block) return result
+  if (record === undefined || result?.block !== undefined) return result
   // Delete the record before acting: whatever happens next, this session tries at most once.
   await $.store.delete(key)
   if (LOAD_SKILL.test(typeof e.prompt === 'string' ? e.prompt : '')) return result
@@ -278,27 +279,37 @@ async function linkFree($, source, dest) {
   }
 }
 
-// 'linked', 'taken' when something is already at target, or 'failed'.
+// 'linked', 'taken' when something is already at target, or 'failed', which includes not being
+// able to tell: the caller then keeps the source where it is.
 async function tryLink($, source, target) {
-  let run
+  let linked
   try {
-    run = await $.process.run(['link', source, target])
+    linked = (await $.process.run(['link', source, target])).exitCode === 0
+  } catch (error) {
+    linked = false   // a call that failed may still have linked: what is at target decides
+  }
+  if (linked) return 'linked'
+  try {
+    return (await $.fs.exists(target)) ? 'taken' : 'failed'
   } catch (error) {
     return 'failed'
   }
-  if (run.exitCode === 0) return 'linked'
-  return (await $.fs.exists(target)) ? 'taken' : 'failed'
 }
 
-// Null once the claim's name is gone, else the claim, which the report then names.
+// Null once the claim's name is gone, else the claim, which may remain and is reported.
 async function removeClaim($, claim) {
-  let run
+  let removed
   try {
-    run = await $.process.run(['rm', '-f', '--', claim])
+    removed = (await $.process.run(['rm', '-f', '--', claim])).exitCode === 0
+  } catch (error) {
+    removed = false   // a call that failed may still have removed it: whether it is there decides
+  }
+  if (removed) return null
+  try {
+    return (await $.fs.exists(claim)) ? claim : null
   } catch (error) {
     return claim
   }
-  return run.exitCode === 0 ? null : claim
 }
 
 async function mustRun($, argv) {

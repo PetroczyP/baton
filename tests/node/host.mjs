@@ -6,16 +6,18 @@
 // the semantics the mods documentation gives (rows of the v2 spec's section 2 in brackets):
 //
 //   $.fs.read      rejects a missing file or one over 4 MiB; { as: 'bytes' } gives { base64 }  [F10]
-//   $.fs.write     creates the file and its directories                                       [F10]
+//   $.fs.write     creates the file and its directories; rejects text over 4 MiB              [F10]
 //   $.fs.exists    follows symbolic links                                                     [F10]
 //   $.fs.stat      { kind: 'file' | 'dir' | 'other', size, mtimeMs, isLink } of what the path
 //                  leads to; a link that leads nowhere is `other` described by the link itself;
 //                  rejects ENOENT                                                             [F10]
-//   $.process.run  argv, no shell; init.env laid over the host's environment; resolves any
-//                  exit code, each stream cut to its first 4 MiB with isStdoutTruncated /
-//                  isStderrTruncated; a signal reads as exit code 1; rejects when the program
-//                  cannot start or runs past timeoutMs                                        [F11]
-//   $.store        an in-memory key-value store of JSON copies, at most 4 MiB of JSON        [F12]
+//   $.process.run  argv, no shell; cwd the session's unless given; init.env laid over the
+//                  host's environment; init.stdin written then closed; git with repo hooks
+//                  off; resolves any exit code, each stream cut to its first 4 MiB (a cut
+//                  character dropped) with isStdoutTruncated / isStderrTruncated; a signal
+//                  reads as exit code 1; rejects when the program cannot start or runs past
+//                  timeoutMs                                                                  [F11]
+//   $.store        an in-memory key-value store of JSON copies, at most 4 MiB of JSON text    [F12]
 //   $.env.get      reads this host's environment, not the test process's                     [F13]
 //   $.ui.log       collected in `logs`                                                        [F14]
 //
@@ -49,15 +51,27 @@ function matches(filter, e) {
   })
 }
 
+// The first `limit` bytes of UTF-8 output as text, without a character the cut split.
+export function cutUtf8(bytes, limit) {
+  if (bytes.length <= limit) return bytes.toString('utf8')
+  let end = limit
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1
+  return bytes.subarray(0, end).toString('utf8')
+}
+
 function runReal(argv, init, env) {
+  const args = argv[0] === 'git' ? ['-c', 'core.hooksPath=/dev/null', ...argv.slice(1)] : argv.slice(1)
   return new Promise((resolve, reject) => {
     let child
     try {
-      child = spawn(argv[0], argv.slice(1), { cwd: init.cwd, env, stdio: ['ignore', 'pipe', 'pipe'] })
+      child = spawn(argv[0], args, { cwd: init.cwd, env, stdio: ['pipe', 'pipe', 'pipe'] })
     } catch (error) {
       reject(error)
       return
     }
+    // A child that exits without reading its input closes the pipe first: EPIPE is not a failure.
+    child.stdin.on('error', (error) => { if (error.code !== 'EPIPE') reject(error) })
+    child.stdin.end(init.stdin ?? '')
     const out = { stdout: [], stderr: [] }
     let settled = false
     const timer = setTimeout(() => {
@@ -81,8 +95,8 @@ function runReal(argv, init, env) {
       const stderr = Buffer.concat(out.stderr)
       resolve({
         exitCode: code ?? 1,
-        stdout: stdout.subarray(0, OUTPUT_LIMIT).toString('utf8'),
-        stderr: stderr.subarray(0, OUTPUT_LIMIT).toString('utf8'),
+        stdout: cutUtf8(stdout, OUTPUT_LIMIT),
+        stderr: cutUtf8(stderr, OUTPUT_LIMIT),
         isStdoutTruncated: stdout.length > OUTPUT_LIMIT,
         isStderrTruncated: stderr.length > OUTPUT_LIMIT,
       })
@@ -102,7 +116,8 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
     const bytes = fs.readFileSync(file)
     return options?.as === 'bytes' ? { base64: bytes.toString('base64') } : bytes.toString('utf8')
   }
-  const realRun = (argv, init = {}) => runReal(argv, init, { ...currentEnv, ...(init.env ?? {}) })
+  const realRun = (argv, init = {}) => runReal(argv, { ...init, cwd: absolute(init.cwd ?? '.') },
+    { ...currentEnv, ...(init.env ?? {}) })
   const absolute = (file) => path.resolve(cwd, file)
 
   const $ = {
@@ -111,6 +126,7 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
         ? intercept.read(absolute(file), () => realRead(absolute(file), options), options)
         : realRead(absolute(file), options)),
       write: async (file, text) => {
+        if (Buffer.byteLength(text) > READ_LIMIT) throw new Error(`writing ${file} would be over 4 MiB`)
         fs.mkdirSync(path.dirname(absolute(file)), { recursive: true })
         fs.writeFileSync(absolute(file), text)
       },
@@ -133,7 +149,7 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
       get: async (key) => (store.has(key) ? JSON.parse(store.get(key)) : undefined),
       set: async (key, value) => {
         const next = new Map(store).set(key, JSON.stringify(value))
-        const size = JSON.stringify(Object.fromEntries([...next].map(([k, v]) => [k, JSON.parse(v)]))).length
+        const size = Buffer.byteLength(JSON.stringify(Object.fromEntries([...next].map(([k, v]) => [k, JSON.parse(v)]))))
         if (size > STORE_LIMIT) throw new Error('the store would exceed 4 MiB')
         store.set(key, JSON.stringify(value))
       },

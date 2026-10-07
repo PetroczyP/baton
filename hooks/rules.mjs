@@ -60,8 +60,12 @@ function utcSeconds(value) {
   const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z$/.exec(value)
   if (!m) return null
   const [year, month, day, hour, minute, second] = m.slice(1).map(Number)
-  const ms = Date.UTC(year, month - 1, day, hour, minute, second)
-  const back = new Date(ms)
+  if (year === 0) return null
+  // setUTCFullYear, unlike Date.UTC, keeps years 1 to 99 as written.
+  const back = new Date(0)
+  back.setUTCFullYear(year, month - 1, day)
+  back.setUTCHours(hour, minute, second, 0)
+  const ms = back.getTime()
   const exact = back.getUTCFullYear() === year && back.getUTCMonth() === month - 1 && back.getUTCDate() === day
     && back.getUTCHours() === hour && back.getUTCMinutes() === minute && back.getUTCSeconds() === second
   return exact ? ms / 1000 : null
@@ -192,17 +196,20 @@ export const REFUSALS = {
 
 // What the user and Claude are told after the first prompt, by the archive's outcome.
 export function archivedTexts({ outcome, place, handoff, leftover }) {
-  const extra = leftover ? ` A second name for it, ${leftover}, could not be removed.` : ''
+  const extra = leftover ? ` Torch could not remove its temporary name for it, ${leftover}, which may remain.` : ''
   switch (outcome) {
     case 'archived':
-      return { banner: `Handoff archived to ${place}${extra}`, context: `The auto-loaded handoff is now archived at ${place}.` }
+      return {
+        banner: `Handoff archived to ${place}${leftover ? `.${extra}` : ''}`,
+        context: `The auto-loaded handoff is now archived at ${place}.${extra}`,
+      }
     case 'changed':
       return {
         banner: `${HANDOFF_NAME} changed after it was loaded, so it was left for the next session`
           + (place ? ` (kept in ${place}).` : '.') + extra,
         context: `Another session saved a newer handoff after this session loaded its own. The file at `
           + `${handoff} is that newer handoff, not the one loaded at session start`
-          + (place ? `; an intermediate save is kept at ${place}.` : '.'),
+          + (place ? `; an intermediate save is kept at ${place}.` : '.') + extra,
       }
     case 'kept':
       return {
