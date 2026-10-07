@@ -56,7 +56,7 @@ A handoff too large to include is replaced by its path and an instruction to rea
 1. **Only the newest handoff is loaded.** That's `handoff-before-clear.md` at the project root, the git top level or else the folder you started in. Each save overwrites it. The archive is never read automatically, and neither is another project's handoff.
 2. **Only new sessions and `/clear` load it.** Resumed and compacted sessions already have their context.
 3. **Only interactive Claude Code on your machine loads it.** A headless run (`claude -p`, the Agent SDK), Cowork, a cloud or remote session, and other hosts never load it. Only the session that loaded a handoff archives it. Torch is tested in the terminal; the IDE extensions and the desktop app's Code tab run the same Claude Code, but Torch isn't tested there.
-4. **Your first message archives it.** It moves to `.claude/handoff-archive/<saved-time>.md`. It never overwrites an existing archive, and never deletes a handoff that another session saved in the meantime. If it can't finish the move, Torch tells you and Claude where the file is: in rare cases, a hidden `.handoff-claim-….md` file at the project root. A first message that another hook blocks doesn't count. Commands like `/clear`, `/exit`, `/model` and `/effort` don't count as messages, so a session you close without typing leaves the handoff for the next one.
+4. **Your first message archives it.** It moves to `.claude/handoff-archive/<saved-time>.md`. It never overwrites an existing archive, and never deletes a handoff that another session saved in the meantime. If it can't finish the move, Torch tells you and Claude where the file is: in rare cases, a hidden `.handoff-claim-….md` file at the project root. When Torch sees that another hook blocked your first message, it leaves the handoff for the next one. Commands like `/clear`, `/exit`, `/model` and `/effort` don't count as messages, so a session you close without typing leaves the handoff for the next one.
 5. **A first message of `/torch:load-handoff` leaves the file to that skill.**
 6. **Old handoffs are announced, not loaded.** If a handoff was saved more than 14 days ago, the banner says it's there and it stays put. The save time comes from the handoff's `saved_at`, or the file's modification time without it.
 7. **A handoff committed to the repository is not loaded.** Handoffs are meant to stay out of commits, so a tracked one may be someone else's or may have come with a clone. It also isn't loaded inside a git repository when git can't tell whether it is tracked. These checks do not prove who wrote a file; an untracked handoff from someone else can still load automatically.
@@ -88,7 +88,7 @@ Torch is a Claude Code *mod*: JavaScript in [`hooks/torch.mjs`](hooks/torch.mjs)
   - writes `handoff-before-clear.md` at the project root
 - **`/torch:load-handoff`**
   - runs `git rev-parse --show-toplevel`, `git branch --show-current`, `git rev-parse HEAD` and `git status --short`
-  - reads the handoff, or the newest archived one, plus the project's `CLAUDE.md` and the files the handoff lists
+  - reads the handoff, or else one Torch couldn't finish archiving or the newest archived one, plus the project's `CLAUDE.md` and the files the handoff lists
   - moves it to the archive if you choose that
 
 See [PRIVACY.md](PRIVACY.md) for retention and contact details.

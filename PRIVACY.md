@@ -7,7 +7,7 @@ Torch is a Claude Code plugin that runs entirely on your computer, inside Claude
 ## What Torch reads
 
 - `handoff-before-clear.md` at the root of the project where you start Claude Code, and the project's git state, through `git status` and the other git commands listed in the [README](README.md#what-torch-reads-runs-and-writes).
-- When you run `/torch:load-handoff`: the handoff, or the newest archived one, the project's `CLAUDE.md`, and the files the handoff lists.
+- When you run `/torch:load-handoff`: the handoff, or else one Torch couldn't finish archiving or the newest archived one, the project's `CLAUDE.md`, and the files the handoff lists.
 
 ## What Torch writes, and how long it stays
 
