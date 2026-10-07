@@ -407,6 +407,7 @@ test('the context sits beside what other hooks added', async (t) => {
   assert.equal(result.additionalContext[0], 'from a settings hook')
   assert.match(result.additionalContext[1], /Mine\./)
   assert.equal(result.sessionTitle, 'kept')
+  assert.deepEqual(Object.keys(result).sort(), ['additionalContext', 'sessionTitle'], 'nothing else, no block')
 })
 
 test('truncated git output counts as git failing', async (t) => {
@@ -507,4 +508,57 @@ test('a handoff of exactly 4 MiB is read and pointed to', async (t) => {
   const out = await w.start()
   assert.match(out.context, /too long to include here/)
   assert.match(out.banner, /Claude reads it from the file/)
+})
+
+// Freeze Date.now for a test, so an exact cutoff can be checked.
+function freezeNow(t, ms) {
+  const real = Date.now
+  Date.now = () => ms
+  t.after(() => { Date.now = real })
+}
+
+test('a handoff saved exactly 14 days ago still loads', async (t) => {
+  const w = await fixture(t)
+  const sha = w.initRepo()
+  const now = Date.parse('2026-10-07T12:00:00Z')
+  freezeNow(t, now)
+  w.writeHandoff(handoffText({ head: sha, body: 'Exactly at the limit.', savedAt: '2026-09-23T12:00:00Z' }))
+  const out = await w.start()
+  assert.match(out.context, /Exactly at the limit\./)
+})
+
+test('a record exactly 30 days old is kept', async (t) => {
+  const w = await fixture(t)
+  const now = Date.parse('2026-10-07T12:00:00Z')
+  freezeNow(t, now)
+  await w.host.$.store.set('session:at-the-limit', { at: now - 30 * 86_400_000 })
+  await w.start()
+  assert.deepEqual(await w.host.$.store.keys(), ['session:at-the-limit'])
+})
+
+test('the two git status calls run side by side', async (t) => {
+  const w = await fixture(t)
+  const sha = w.initRepo()
+  w.writeHandoff(handoffText({ head: sha }))
+  let started = 0
+  let finished = 0
+  let overlapped = false
+  let release
+  const both = new Promise((resolve) => { release = resolve })
+  w.host.intercept.run = async (argv, real) => {
+    if (argv[0] !== 'git') return real()
+    started += 1
+    if (started === 2) {
+      overlapped = finished === 0
+      release()
+    }
+    await Promise.race([both, new Promise((resolve) => setTimeout(resolve, 3_000))])
+    const done = await real()
+    finished += 1
+    return done
+  }
+  const out = await w.start()
+  assert.equal(started, 2)
+  assert.ok(overlapped, 'the second call started before the first ended')
+  assert.match(out.banner, /^Handoff loaded: /)
 })

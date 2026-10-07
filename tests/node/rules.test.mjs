@@ -67,6 +67,8 @@ test('local time names its zone; the archive stamp is UTC', () => {
   process.env.TZ = 'UTC'
   try {
     assert.equal(localTime(0), '1970-01-01 00:00 UTC')
+    process.env.TZ = 'Asia/Kolkata'
+    assert.equal(localTime(0), '1970-01-01 05:30 GMT+5:30')
   } finally {
     if (saved === undefined) delete process.env.TZ
     else process.env.TZ = saved
@@ -74,13 +76,14 @@ test('local time names its zone; the archive stamp is UTC', () => {
   assert.equal(archiveStamp(Date.parse('2026-10-06T14:54:32.900Z') / 1000), '20261006T145432Z')
 })
 
-test(`a handoff is inlined up to ${CONTEXT_LIMIT} UTF-16 units of context, and pointed to above`, () => {
+test('a handoff is inlined up to 9,800 UTF-16 units of context, and pointed to above', () => {
+  assert.equal(CONTEXT_LIMIT, 9_800)
   const facts = { handoff: '/p/handoff-before-clear.md', saved: 's', age: '1 min', drift: ['clean'], archiveTo: '/a.md', recorded: true }
   const base = loadedTexts({ ...facts, text: '' }).context.length
-  const fits = loadedTexts({ ...facts, text: 'x'.repeat(CONTEXT_LIMIT - base) })
-  assert.equal(fits.context.length, CONTEXT_LIMIT)
+  const fits = loadedTexts({ ...facts, text: 'x'.repeat(9_800 - base) })
+  assert.equal(fits.context.length, 9_800)
   assert.match(fits.context, /<handoff>/)
-  const over = loadedTexts({ ...facts, text: 'x'.repeat(CONTEXT_LIMIT - base + 1) })
+  const over = loadedTexts({ ...facts, text: 'x'.repeat(9_801 - base) })
   assert.doesNotMatch(over.context, /<handoff>/)
   assert.match(over.banner, /chars, Claude reads it from the file/)
 })

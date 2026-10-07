@@ -68,3 +68,16 @@ test('the store keeps JSON copies and refuses more than 4 MiB of JSON text', asy
   await assert.rejects(host.$.store.set('big', 'é'.repeat(2 * 1024 * 1024 + 10)), /4 MiB/)
   assert.deepEqual(await host.$.store.keys(), ['k'])
 })
+
+test('git runs with the repository\'s hooks off', async (t) => {
+  const { dir, host } = world(t)
+  const env = { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't',
+    GIT_COMMITTER_EMAIL: 't@example.com', GIT_CONFIG_NOSYSTEM: '1', HOME: dir }
+  assert.equal((await host.$.process.run(['git', 'init', '-q'], { env })).exitCode, 0)
+  const hook = path.join(dir, '.git', 'hooks', 'pre-commit')
+  fs.writeFileSync(hook, '#!/bin/sh\ntouch hook-ran\nexit 1\n')
+  fs.chmodSync(hook, 0o755)
+  const commit = await host.$.process.run(['git', 'commit', '-q', '--allow-empty', '-m', 'x'], { env })
+  assert.equal(commit.exitCode, 0, commit.stderr)
+  assert.ok(!fs.existsSync(path.join(dir, 'hook-ran')))
+})

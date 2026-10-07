@@ -170,11 +170,15 @@ test('a command that only starts like load-handoff is a first message like any o
 })
 
 test('a successful load and archive add context and nothing else', async (t) => {
-  const { w } = await loaded(t)
+  const w = await fixture(t)
+  const sha = w.initRepo()
+  w.writeHandoff(handoffText({ head: sha }))
+  const load = await w.start()
+  assert.match(load.context, /Ship the widget\./)
+  assert.deepEqual(Object.keys(load.result), ['additionalContext'])
   const first = await w.prompt('go')
+  assert.match(first.banner, /^Handoff archived to /)
   assert.deepEqual(Object.keys(first.result), ['additionalContext'])
-  const start = await w.start({ session: '22222222-0000-0000-0000-000000000000' })
-  assert.deepEqual(Object.keys(start.result), [])
 })
 
 test("one session's prompt never touches another session's record or handoff", async (t) => {
@@ -200,10 +204,17 @@ test('a prompt from a folder that is not a POSIX path touches nothing', async (t
   const { w } = await loaded(t)
   const runs = []
   w.host.intercept.run = (argv, real) => { runs.push(argv[0]); return real() }
+  const store = w.host.$.store
+  const reads = []
+  w.host.$.store = Object.fromEntries(Object.entries(store).map(([name, call]) => [name, (...args) => {
+    reads.push(name)
+    return call(...args)
+  }]))
   const out = await w.fire('classic.UserPromptSubmit', {
     session_id: SESSION, cwd: 'C:\\work', hook_event_name: 'UserPromptSubmit', prompt: 'go',
   })
-  assert.deepEqual([out.lines, out.context, runs], [[], '', []])
+  w.host.$.store = store
+  assert.deepEqual([out.lines, out.context, runs, reads], [[], '', [], []])
   assert.deepEqual(await w.host.$.store.keys(), [`session:${SESSION}`])
   assert.ok(fs.existsSync(w.handoff))
 })
@@ -279,4 +290,40 @@ test('a temporary name that could not be removed is reported to the user and to 
       }
     })
   }
+})
+
+test('a changed handoff whose temporary name could not be removed is reported to both', async (t) => {
+  const { w } = await loaded(t)
+  fs.writeFileSync(w.handoff, handoffText({ body: 'A newer plan.' }))
+  w.host.intercept.run = async (argv, real) => (argv[0] === 'rm'
+    ? { exitCode: 1, stdout: '', stderr: 'rm: denied', isStdoutTruncated: false, isStderrTruncated: false }
+    : real())
+  const out = await w.prompt('go')
+  const [claim] = fs.readdirSync(w.repo).filter((name) => name.startsWith('.handoff-claim-'))
+  const leftover = path.join(w.repo, claim)
+  assert.match(out.banner, /changed after it was loaded/)
+  assert.ok(out.banner.includes(`${leftover}, which may remain`), out.banner)
+  assert.ok(out.context.includes(`${leftover}, which may remain`), out.context)
+  assert.match(fs.readFileSync(w.handoff, 'utf8'), /A newer plan\./)
+})
+
+test('a rename that happened is archived even when the live path cannot be checked', async (t) => {
+  const { w } = await loaded(t)
+  const original = fs.readFileSync(w.handoff)
+  w.host.intercept.run = async (argv, real) => {
+    if (argv[0] !== 'mv') return real()
+    await real()
+    throw new Error('mv was interrupted')
+  }
+  const exists = w.host.$.fs.exists
+  w.host.$.fs.exists = async (file) => {
+    if (file === w.handoff) throw new Error('a policy refused it')
+    return exists(file)
+  }
+  const out = await w.prompt('go')
+  w.host.$.fs.exists = exists
+  const [archived] = w.archived()
+  assert.deepEqual(fs.readFileSync(archived), original)
+  assert.deepEqual(out.lines, [`Handoff archived to ${archived}`])
+  assert.ok(out.context.includes(archived))
 })

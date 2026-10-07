@@ -254,15 +254,14 @@ async function claimFailure($, handoff, claim) {
   } catch (error) {
     reason = error instanceof Error ? error.message : String(error)
   }
-  let claimed
+  // A claim that exists decides by itself; the live path matters only when it doesn't.
   let live
   try {
-    claimed = await $.fs.exists(claim)
+    if (await $.fs.exists(claim)) return null
     live = await $.fs.exists(handoff)
   } catch (error) {
     throw new Error(`could not tell whether ${handoff} was moved to ${claim}: ${reason}`)
   }
-  if (claimed) return null
   if (!live) return 'gone'
   throw new Error(`mv could not claim ${handoff}: ${reason}`)
 }
