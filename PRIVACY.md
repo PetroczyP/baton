@@ -7,7 +7,8 @@ Torch is a Claude Code plugin that runs entirely on your computer, inside Claude
 ## What Torch reads
 
 - `handoff-before-clear.md` at the root of the project where you start Claude Code, and the project's git state, through the two `git status` commands listed in the [README](README.md#what-torch-sends-reads-runs-and-writes).
-- From your session: its id, the folder you started in, and whether it is new or cleared; for each message, whether you sent it; for your first message, only whether it starts with `/torch:load-handoff`. Torch stores and logs no message text.
+- From your session: its id, the folder you started in, and whether it is new or cleared; for each message, whether you sent it; for your first message, only whether it starts with `/torch:load-handoff` or `/load-handoff`. Torch stores and logs no message text.
+- From your computer, to decide whether to load at all: whether a `.git` folder or file is in the folder you start in or one above it, and two variables Claude Code sets in its environment, `CLAUDE_CODE_ENTRYPOINT` and `CLAUDE_CODE_SESSION_ATTENDED`, which tell an interactive session on your machine from a headless run or another host.
 - When you run `/torch:load-handoff`: the handoff, or else one Torch couldn't finish archiving or the newest archived one, the project's `CLAUDE.md`, and the files the handoff lists.
 
 ## What Torch writes, and how long it stays
@@ -21,7 +22,7 @@ Torch is a Claude Code plugin that runs entirely on your computer, inside Claude
 
 Torch makes no network requests of its own. With your first message it adds the handoff's text (or its path, when it is too large), where it was archived, its save time and the git drift summary to your Claude Code conversation. Torch does not check who wrote the file. Your Claude service processes that under your agreement with Anthropic or with your model provider, like everything else in the session. Torch does not send it, or anything else, to any other destination.
 
-To move the handoff into the archive, Torch runs `mkdir`, `mv`, `link` and `rm` on your computer, as you and outside Claude Code's sandbox. They receive fixed options and file paths only, never the handoff's text or anything from your conversation, and none of them uses the network. The [README](README.md#what-torch-sends-reads-runs-and-writes) lists each command exactly as it runs.
+To move the handoff into the archive, Torch runs `mkdir`, `mv`, `link` and `rm` on your computer, as you and outside Claude Code's sandbox and its permission rules. They receive fixed options and file paths only, never the handoff's text or anything from your conversation, and none of them uses the network. The [README](README.md#what-torch-sends-reads-runs-and-writes) lists each command exactly as it runs.
 
 ## Contact
 

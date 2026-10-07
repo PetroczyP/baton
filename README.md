@@ -54,9 +54,9 @@ A handoff too large to include is replaced by its path and an instruction to rea
 
 1. **Only the newest handoff is loaded.** That's `handoff-before-clear.md` at the project root, the git top level or else the folder you started in. Each save overwrites it. The archive is never read automatically, and neither is another project's handoff.
 2. **Only new sessions and `/clear` announce it, and only your first message delivers it.** Resumed and compacted sessions already have their context.
-3. **Only interactive Claude Code on your machine loads it.** A headless run (`claude -p`, the Agent SDK), Cowork, a cloud or remote session, and other hosts never load it. Only the session that announced a handoff delivers and archives it, and only a message you send counts: a background task's notification or another session's message leaves the handoff for yours. Only the run of Torch that announced a handoff acts on it: if Torch is reloaded in between, as when an update to it is loaded mid-session, or Claude Code restarts and the session is resumed while its record is still there, your next message neither gives Claude the handoff nor moves it, says so, and leaves the file for `/torch:load-handoff`. Torch is tested in the terminal; the IDE extensions and the desktop app's Code tab run the same Claude Code, but Torch isn't tested there.
+3. **Only interactive Claude Code on your machine loads it.** Torch skips a session Claude Code marks as unattended, and these hosts: a headless run (`claude -p`, the Agent SDK), Cowork, MCP mode, a cloud or remote session, and the GitHub Action, Slack and Teams integrations. Only the session that announced a handoff delivers and archives it, and only a message you send counts: a background task's notification or another session's message leaves the handoff for yours. Only the run of Torch that announced a handoff acts on it: if Torch is reloaded in between, as when an update to it is loaded mid-session, or Claude Code restarts and the session is resumed while its record is still there, your next message neither gives Claude the handoff nor moves it, says so, and leaves the file for `/torch:load-handoff`. Torch is tested in the terminal; the IDE extensions and the desktop app's Code tab run the same Claude Code, but Torch isn't tested there.
 4. **Your first message archives it.** It moves to `.claude/handoff-archive/<saved-time>.md` as the message goes to Claude. It never overwrites an existing archive, and never deletes a handoff that another session saved in the meantime. If it can't finish the move, Torch tells you and Claude where the file is: in rare cases, a hidden `.handoff-claim-….md` file at the project root. If another hook refuses that first message, Claude doesn't get the handoff and Torch doesn't retry; `/torch:load-handoff` brings it back from the archive. Commands like `/clear`, `/exit`, `/model` and `/effort` don't count as messages, so a session you close without typing leaves the handoff for the next one.
-5. **A first message of `/torch:load-handoff` leaves the file to that skill.**
+5. **A first message of `/torch:load-handoff` or `/load-handoff` leaves the file to that skill.**
 6. **Old handoffs are announced, not loaded.** If a handoff was saved more than 14 days ago, the banner says it's there and it stays put. The save time comes from the handoff's `saved_at`, or the file's modification time without it.
 7. **A handoff committed to the repository is not loaded.** Handoffs are meant to stay out of commits, so a tracked one may be someone else's or may have come with a clone. It also isn't loaded inside a git repository when git can't tell whether it is tracked. These checks do not prove who wrote a file; an untracked handoff from someone else can still load automatically.
 8. **A large handoff is pointed to, not pasted.** Torch includes a handoff of up to about 10,000 characters, to keep the session's context lean. Above that, Claude is told where to read the file. A handoff over 4 MiB is not loaded at all.
@@ -79,11 +79,13 @@ That context becomes part of your Claude Code conversation, which your Claude se
 
 - At session start: the session id, the folder you started in, and whether the session is new or cleared.
 - With each message: whether you sent it, or something else did, such as a background task's notification.
-- With your first message: only whether its text starts with `/torch:load-handoff`.
+- With your first message: only whether its text starts with `/torch:load-handoff` or `/load-handoff`.
+
+**What else it reads.** At session start: `handoff-before-clear.md`; whether a `.git` folder or file is in the folder you started in or one above it, which finds the project root; and two variables Claude Code sets in its own environment, `CLAUDE_CODE_ENTRYPOINT` and `CLAUDE_CODE_SESSION_ATTENDED`, only to tell an interactive session on your machine from the hosts in rule 3.
 
 Torch stores no message text and logs none. The record it keeps for a session (below) holds no handoff text either.
 
-**What it runs, and why.** The mods API has no call to move a file, so Torch starts these programs. Each is named with its arguments, written as fixed text in the code except the file paths, and none runs through a shell. They run as you, outside Claude Code's sandbox, like any hook. They get fixed options, file paths and a working folder, never the handoff's text or anything from your conversation, whether as arguments or on standard input. None of them uses the network: `git status` reads only your local repository.
+**What it runs, and why.** The mods API has no call to move a file, so Torch starts these programs. Each is named with its arguments, written as fixed text in the code except the file paths, and none runs through a shell. They run as you, outside Claude Code's sandbox and its permission rules, like any hook: a `deny` rule for Claude's tools doesn't apply to them. They get fixed options, file paths and a working folder, never the handoff's text or anything from your conversation, whether as arguments or on standard input. None of them uses the network: `git status` reads only your local repository.
 
 | When | Command, as run | Why |
 | - | - | - |
@@ -130,7 +132,7 @@ handoff-before-clear.md
 
 ## Install
 
-Install Torch from Anthropic's plugin directory: in claude.ai under **Customize → Plugins**, or with `/plugin` in Claude Code. To try a copy of this repository without installing it, start Claude Code with `claude --plugin-dir /path/to/torch`.
+Install Torch from Anthropic's plugin directory: with `/plugin` in Claude Code, or in claude.ai under **Customize → Plugins**, which reaches Claude Code when you sign in to Claude Code with that claude.ai account. To try a copy of this repository without installing it, start Claude Code with `claude --plugin-dir /path/to/torch`.
 
 ## The handoff contract
 
