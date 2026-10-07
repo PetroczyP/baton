@@ -122,6 +122,7 @@ test('a session record that is not valid is reported once and never stops the me
     'a save time that is not a number': (r) => ({ ...r, savedTs: 'yesterday' }),
     'no drift': (r) => ({ ...r, drift: undefined }),
     'drift that is not text': (r) => ({ ...r, drift: [1] }),
+    'a save time no date can hold': (r) => ({ ...r, savedTs: 1e20 }),
   }
   for (const [label, breakIt] of Object.entries(broken)) {
     await t.test(label, async (st) => {
@@ -191,6 +192,19 @@ test('a first message a later hook refuses passes back untouched; the handoff is
   assert.equal(w.archived().length, 1)
   const next = await w.prompt('go again')
   assert.deepEqual([next.banner, next.context], ['', ''], 'no retry')
+})
+
+test('a first load-handoff whose record could not be deleted still leaves the file to the skill', async (t) => {
+  const { w } = await announced(t)
+  const remove = w.host.$.store.delete
+  w.host.$.store.delete = async () => { throw new Error('the store is busy') }
+  const skill = await w.prompt('/torch:load-handoff')
+  w.host.$.store.delete = remove
+  assert.deepEqual(skill.lines, ['could not deliver the handoff: the store is busy'])
+  const next = await w.prompt('keep going')
+  assert.deepEqual([next.banner, next.context], ['', ''])
+  assert.ok(fs.existsSync(w.handoff), 'the file stays with the skill')
+  assert.deepEqual(w.archived(), [])
 })
 
 test('a failure while announcing is logged and the session starts', async (t) => {

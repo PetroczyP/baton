@@ -59,7 +59,8 @@ test("Claude Code on the user's machine loads it", async (t) => {
   const sha = w.initRepo()
   for (const entrypoint of ['cli', 'claude-vscode', 'claude-desktop']) {
     w.writeHandoff(handoffText({ head: sha, body: `Loaded in ${entrypoint}.` }))
-    const out = await w.load({ env: { ...w.env, CLAUDE_CODE_ENTRYPOINT: entrypoint } })
+    // Each start is a new session, with a session id of its own.
+    const out = await w.load({ env: { ...w.env, CLAUDE_CODE_ENTRYPOINT: entrypoint }, session: `session-${entrypoint}` })
     assert.match(out.context, new RegExp(`Loaded in ${entrypoint}\\.`))
   }
 })
@@ -181,7 +182,7 @@ test('saved_at decides age and archive name, not the file time', async (t) => {
   assert.match(out.banner, /older than 14 days/)
   const saved = iso(2)
   w.writeHandoff(handoffText({ head: sha, savedAt: saved }))
-  out = await w.load()
+  out = await w.load({ session: 'a-later-session' })
   const stamp = saved.replaceAll('-', '').replaceAll(':', '')
   assert.ok(out.context.includes(`It is now archived at ${path.join(w.archiveDir, `${stamp}.md`)}.`), out.context)
 })
@@ -369,6 +370,16 @@ test('a session without a usable id is told to load the handoff by hand', async 
   assert.deepEqual(await w.host.$.store.keys(), [])
   assert.ok(fs.existsSync(w.handoff))
 })
+test('the session record holds only what the README lists, and no handoff text', async (t) => {
+  const w = await fixture(t)
+  const sha = w.initRepo()
+  w.writeHandoff(handoffText({ head: sha, body: 'SECRET-BODY-TEXT' }))
+  await w.start()
+  const record = await w.host.$.store.get(`session:${SESSION}`)
+  assert.deepEqual(Object.keys(record).sort(), ['archiveTo', 'at', 'drift', 'handoff', 'savedTs', 'sha256'])
+  assert.doesNotMatch(JSON.stringify(record), /SECRET-BODY-TEXT/)
+})
+
 test('records of sessions that never prompted expire', async (t) => {
   const w = await fixture(t)
   const now = Date.now()

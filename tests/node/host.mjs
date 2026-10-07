@@ -34,6 +34,7 @@
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 const READ_LIMIT = 4 * 1024 * 1024
 const OUTPUT_LIMIT = 4 * 1024 * 1024
@@ -110,6 +111,8 @@ function runReal(argv, init, env) {
     })
   })
 }
+
+let loads = 0
 
 export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {}) {
   let currentEnv = env
@@ -215,8 +218,11 @@ export function createHost({ env = {}, cwd = process.cwd(), intercept = {} } = {
     return dispatch(0, deepFreeze(structuredClone(e)))
   }
 
+  // Each host loads its own instance of the module, as each Claude Code process does, so state the
+  // module keeps for its life starts empty in every test.
   async function load(modulePath) {
-    const module = await import(modulePath)
+    loads += 1
+    const module = await import(`${pathToFileURL(modulePath).href}?host=${loads}`)
     module.register(on, {})
   }
 

@@ -107,6 +107,28 @@ test('each hook ends in a shape the directory reads', () => {
   assert.doesNotMatch(source, /classic\.UserPromptSubmit/)
 })
 
+// The arguments of each $.process.run call, up to its closing parenthesis.
+function processRunCalls() {
+  const calls = []
+  for (let at = source.indexOf('$.process.run('); at >= 0; at = source.indexOf('$.process.run(', at + 1)) {
+    let depth = 0
+    let end = at + '$.process.run'.length
+    do {
+      if (source[end] === '(') depth += 1
+      if (source[end] === ')') depth -= 1
+      end += 1
+    } while (depth > 0)
+    calls.push(source.slice(at, end))
+  }
+  return calls
+}
+
+test('no program the mod runs gets standard input', () => {
+  const calls = processRunCalls()
+  assert.equal(calls.length, 6)
+  for (const call of calls) assert.doesNotMatch(call, /stdin/, call)
+})
+
 test('the README lists every command the mod runs, as it runs it', () => {
   const readme = read('README.md').replaceAll("'", '')
   const calls = [...source.matchAll(/\$\.process\.run\(\[([^\]]*)\]/g)].map((m) => m[1])
