@@ -8,6 +8,7 @@
 //   prompt.submit                          on the session's first message from the user,
 //                                          archives the handoff and attaches it to that message
 //                                          as context, unless the message is /torch:load-handoff
+//                                          or /load-handoff
 //
 // Every function that is handed `$` is declared in this file, as `claude plugin validate`
 // requires; rules.mjs holds the rules that need no file or process access. Torch never answers
@@ -119,7 +120,7 @@ async function announce($, e) {
 
   const drift = driftParts(status, isRepo, fields)
   // The archive name by the save time; if it is taken when the first message comes, archive() moves
-  // on to -2, -3 and so on.
+  // on to -2, -3 and so on, up to -100.
   const archiveTo = joinPath(joinPath(root, ARCHIVE_DIR), `${archiveStamp(savedTs)}.md`)
   const recorded = await recordSession($, usableSessionId(e.session_id), {
     handoff, sha256: await sha256Hex(bytes), archiveTo, savedTs, drift, at: Date.now(), run: RUN,
@@ -128,8 +129,8 @@ async function announce($, e) {
 }
 
 // The context for this message, or null when it passes on unchanged: it is not from the user, its
-// session has no record, it is not the session's first, it hands the file to /torch:load-handoff,
-// or another run of Torch wrote the record.
+// session has no record, it is not the session's first, it hands the file to /torch:load-handoff
+// or /load-handoff, or another run of Torch wrote the record.
 // On the first message the handoff is archived first, so the context says where it now is.
 async function firstMessageContext($, e) {
   if (!USER_ORIGINS.has(e.origin?.kind)) return null

@@ -8,7 +8,7 @@ Torch is a Claude Code plugin that runs entirely on your computer, inside Claude
 
 - `handoff-before-clear.md` at the root of the project where you start Claude Code, and the project's git state, through the two `git status` commands listed in the [README](README.md#what-torch-sends-reads-runs-and-writes).
 - From your session: its id, the folder you started in, and whether it is new or cleared; for each message, whether you sent it; for your first message, only whether it starts with `/torch:load-handoff` or `/load-handoff`. Torch stores and logs no message text.
-- From your computer, to decide whether to load at all: whether a `.git` folder or file is in the folder you start in or one above it, and two variables Claude Code sets in its environment, `CLAUDE_CODE_ENTRYPOINT` and `CLAUDE_CODE_SESSION_ATTENDED`, which tell an interactive session on your machine from a headless run or another host.
+- From your computer: whether a `.git` folder or file is in the folder you start in or any folder above it, which finds the project root; and, to decide whether to load at all, two variables Claude Code sets in its environment, `CLAUDE_CODE_ENTRYPOINT` and `CLAUDE_CODE_SESSION_ATTENDED`, which tell an interactive session from a headless run or another host.
 - When you run `/torch:load-handoff`: the handoff, or else one Torch couldn't finish archiving or the newest archived one, the project's `CLAUDE.md`, and the files the handoff lists.
 
 ## What Torch writes, and how long it stays
