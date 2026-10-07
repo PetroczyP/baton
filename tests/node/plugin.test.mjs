@@ -107,6 +107,22 @@ test('each hook ends in a shape the directory reads', () => {
   assert.doesNotMatch(source, /classic\.UserPromptSubmit/)
 })
 
+test('next is never handed to other code, and each .catch handler ends in return next(e)', () => {
+  const code = source.replace(/\/\/.*$/gm, '')
+  for (const match of code.matchAll(/\bnext\b/g)) {
+    const before = code.slice(match.index - 7, match.index)
+    const after = code.slice(match.index + 4, match.index + 12)
+    const allowed = before === '($, e, ' || after.startsWith('(e)') || after.startsWith('({ ...e,') || after.startsWith('.error')
+    assert.ok(allowed, `next used as: ${code.slice(match.index - 30, match.index + 30).replace(/\s+/g, ' ')}`)
+  }
+  const handlers = [...code.matchAll(/\.catch\(async \(\$, e, next\) => \{([\s\S]*?)\n {4}\}\)/g)].map((m) => m[1])
+  assert.equal(handlers.length, 2, 'one inline handler per hook')
+  for (const body of handlers) {
+    const returns = body.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('return'))
+    assert.deepEqual(returns, ['return next(e)'])
+  }
+})
+
 // The arguments of each $.process.run call, up to its closing parenthesis.
 function processRunCalls() {
   const calls = []
