@@ -98,8 +98,9 @@ Torch stores no message text and logs none. The record it keeps for a session (b
 
 **What it writes.**
 
-- At session start, a small record for the session in Claude Code's storage for Torch (`~/.claude/plugins/store/torch_….json`): the handoff's path, its SHA-256 hash, the planned archive path, its save time, the git drift summary, the time of the record and a random id for the run of Torch that wrote it, under the session id. Each session start where Torch runs also tries to delete any record there that is more than 30 days old; if the store refuses, a record can stay longer.
-- With the first message you send, it deletes the session's record and moves the handoff into `<project>/.claude/handoff-archive/` with the commands above. Only the run of Torch that wrote a record acts on it; another run only deletes it.
+- At session start, a small record for the session in Claude Code's storage for Torch (`~/.claude/plugins/store/torch_….json`): the handoff's path, its SHA-256 hash, the planned archive path, its save time, the git drift summary, the time of the record and a random id for the run of Torch that wrote it, under the session id. Each session start where Torch runs also tries to delete any record there that is more than 30 days old.
+- With the first message you send, it tries to delete the session's record and, once it is gone, moves the handoff into `<project>/.claude/handoff-archive/` with the commands above. Only the run of Torch that wrote a record acts on it; another run only tries to delete it.
+- If the store refuses a deletion, the record stays and nothing is moved; the cleanup at a later session start tries again once the record is more than 30 days old.
 
 **The skills** run only when you or Claude invoke them:
 
