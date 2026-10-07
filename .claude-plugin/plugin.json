@@ -1,7 +1,7 @@
 {
   "name": "torch",
   "displayName": "Torch",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "description": "Pass work between Claude Code sessions: save a structured handoff, and the next session in the project shows what changed in git since, gives the handoff to Claude with your first message, and archives it.",
   "author": {
     "name": "Peter Petroczy",

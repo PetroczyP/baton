@@ -37,18 +37,20 @@ const answered = new Set()
 // set above, after a reload or in a session resumed in a new process, is never acted on.
 const RUN = randomHex(16)
 
+// A failed hook is logged, and its .catch handler passes the event on. In a handler `next` is
+// replay-safe: after the hook's own call it gives that call's result and nothing runs again;
+// before, it runs the hooks beneath once.
 export function register(on) {
   on('classic.SessionStart', { source: ['startup', 'clear'] }, announceHandoff)
-    .catch(($, e, next) => reportFailure($, 'announce', e, next))
+    .catch(async ($, e, next) => {
+      $.ui.log(`could not announce the handoff: ${next.error?.message ?? 'unknown error'}`)
+      return next(e)
+    })
   on('prompt.submit', deliverHandoff)
-    .catch(($, e, next) => reportFailure($, 'deliver', e, next))
-}
-
-// A failed hook is logged, and the event continues: with the result `next` already gave, or
-// by calling it now.
-export async function reportFailure($, verb, e, next) {
-  $.ui.log(`could not ${verb} the handoff: ${next.error?.message ?? 'unknown error'}`)
-  return next.called ? undefined : next(e)
+    .catch(async ($, e, next) => {
+      $.ui.log(`could not deliver the handoff: ${next.error?.message ?? 'unknown error'}`)
+      return next(e)
+    })
 }
 
 export async function announceHandoff($, e, next) {
